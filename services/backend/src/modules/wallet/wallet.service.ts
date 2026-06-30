@@ -4,6 +4,8 @@ import { Repository } from 'typeorm';
 import { ethers } from 'ethers';
 import { Wallet } from './entities/wallet.entity';
 import { EthereumService } from '../blockchain/ethereum.service';
+import { SolanaService } from '../blockchain/solana.service';
+import { PolygonService } from '../blockchain/polygon.service';
 import { logger } from '../../common/logger';
 import * as crypto from 'crypto';
 
@@ -13,6 +15,8 @@ export class WalletService {
     @InjectRepository(Wallet)
     private walletRepository: Repository<Wallet>,
     private ethereumService: EthereumService,
+    private solanaService: SolanaService,
+    private polygonService: PolygonService,
   ) {}
 
   async createWallet(userId: string, chain: string): Promise<Wallet> {
@@ -28,8 +32,30 @@ export class WalletService {
         );
       }
 
-      // Generate new ethers.js wallet (works for Ethereum-compatible chains)
-      const ethersWallet = ethers.Wallet.createRandom();
+      let address: string;
+      let publicKey: string;
+      let privateKey: string;
+
+      // Create wallet based on chain
+      switch (chain.toLowerCase()) {
+        case 'ethereum':
+        case 'polygon':
+          const ethersWallet = ethers.Wallet.createRandom();
+          address = ethersWallet.address;
+          publicKey = ethersWallet.publicKey;
+          privateKey = ethersWallet.privateKey;
+          break;
+
+        case 'solana':
+          const solanaWallet = await this.solanaService.createWallet();
+          address = solanaWallet.address;
+          publicKey = solanaWallet.publicKey;
+          privateKey = solanaWallet.privateKey;
+          break;
+
+        default:
+          throw new BadRequestException(`Unsupported chain: ${chain}`);
+      }
 
       // Encrypt private key (simple encryption; use KMS in production)
       const encryptionKey = process.env.ENCRYPTION_KEY || 'dev-secret-key';
@@ -39,16 +65,16 @@ export class WalletService {
         Buffer.from(encryptionKey.padEnd(32).substring(0, 32)),
         iv,
       );
-      let encrypted = cipher.update(ethersWallet.privateKey, 'utf8', 'hex');
+      let encrypted = cipher.update(privateKey, 'utf8', 'hex');
       encrypted += cipher.final('hex');
       const encryptedPrivateKey = iv.toString('hex') + ':' + encrypted;
 
       // Create wallet record
       const wallet = this.walletRepository.create({
         userId,
-        address: ethersWallet.address,
+        address,
         chain,
-        publicKey: ethersWallet.publicKey,
+        publicKey,
         encryptedPrivateKey,
         recoveryEmail: null,
         isActive: true,
@@ -91,8 +117,28 @@ export class WalletService {
     const wallet = await this.getWalletById(walletId);
 
     try {
-      const balance = await this.ethereumService.getBalance(wallet.address);
-      return ethers.formatEther(balance); // Convert Wei to ETH
+      let balance: string;
+
+      switch (wallet.chain.toLowerCase()) {
+        case 'ethereum':
+          const ethBalance = await this.ethereumService.getBalance(wallet.address);
+          balance = ethers.formatEther(ethBalance);
+          break;
+
+        case 'polygon':
+          const polyBalance = await this.polygonService.getBalance(wallet.address);
+          balance = ethers.formatEther(polyBalance);
+          break;
+
+        case 'solana':
+          balance = await this.solanaService.getBalance(wallet.address);
+          break;
+
+        default:
+          throw new BadRequestException(`Unsupported chain: ${wallet.chain}`);
+      }
+
+      return balance;
     } catch (error) {
       logger.error(`Failed to get balance: ${error.message}`);
       throw error;
