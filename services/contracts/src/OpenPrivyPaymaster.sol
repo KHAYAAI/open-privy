@@ -92,11 +92,21 @@ contract OpenPrivyPaymaster is IPaymaster, Ownable {
   ) external {
     require(msg.sender == address(entryPoint), "Only entry point");
 
-    if (context.length > 0) {
-      (address account, ) = abi.decode(context, (address, uint256));
-      gasSponsored[account] += actualGasCost;
-      emit GasSponsored(account, tx.origin, actualGasCost);
+    if (context.length == 0) {
+      return;
     }
+
+    // Decode context (checks)
+    (address account, uint256 maxCost) = abi.decode(context, (address, uint256));
+
+    // Cap sponsored amount to maxCost (effects first - checks-effects-interactions pattern)
+    uint256 sponsoredAmount = actualGasCost > maxCost ? maxCost : actualGasCost;
+
+    // Update state before external calls (effects)
+    gasSponsored[account] += sponsoredAmount;
+
+    // External interactions last
+    emit GasSponsored(account, tx.origin, sponsoredAmount);
   }
 
   /**

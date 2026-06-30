@@ -17,9 +17,11 @@ contract SimpleAccount is IAccount, Initializable, UUPSUpgradeable {
 
   IEntryPoint public entryPoint;
   address public owner;
+  uint256 public nonce;
 
   event SimpleAccountInitialized(IEntryPoint indexed entryPoint, address indexed owner);
   event Executed(address indexed target, uint256 value, bytes data);
+  event NonceIncremented(uint256 indexed newNonce);
 
   modifier onlyOwner() {
     require(msg.sender == owner, "Only owner");
@@ -84,12 +86,22 @@ contract SimpleAccount is IAccount, Initializable, UUPSUpgradeable {
     bytes32 userOpHash,
     uint256 missingAccountFunds
   ) external onlyEntryPoint returns (uint256 validationData) {
-    address signer = userOpHash.toEthSignedMessageHash().recover(userOp.signature);
+    // Validate nonce to prevent replay attacks
+    if (userOp.nonce != nonce) {
+      return 1; // Invalid nonce
+    }
 
+    // Verify signature
+    address signer = userOpHash.toEthSignedMessageHash().recover(userOp.signature);
     if (signer != owner) {
       return 1; // Invalid signature
     }
 
+    // Increment nonce after validation
+    nonce++;
+    emit NonceIncremented(nonce);
+
+    // Pay entry point for gas costs
     if (missingAccountFunds > 0) {
       (bool success, ) = payable(address(entryPoint)).call{value: missingAccountFunds}("");
       require(success, "Failed to pay entry point");
