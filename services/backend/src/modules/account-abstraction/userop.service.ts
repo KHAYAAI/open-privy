@@ -182,10 +182,44 @@ export class UserOpService {
     }
   }
 
+  /**
+   * Get the current nonce for a SimpleAccount from on-chain state.
+   *
+   * CRITICAL: This MUST match SimpleAccount.sol's nonce field.
+   * Nonce is an incrementing counter (0, 1, 2, ...) that increments
+   * after each successful validateUserOp().
+   *
+   * Mismatch with on-chain nonce will cause SIG_VALIDATION_FAILED.
+   */
   private async getNonce(address: string): Promise<number> {
-    // In production, query EntryPoint contract for actual nonce
-    // For MVP, use timestamp-based nonce
-    return Math.floor(Date.now() / 1000);
+    try {
+      const provider = this.ethereumService.getProvider();
+
+      // SimpleAccount contract ABI (minimal - just nonce() function)
+      const abi = [
+        {
+          inputs: [],
+          name: 'nonce',
+          outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+          stateMutability: 'view',
+          type: 'function',
+        },
+      ];
+
+      const contract = new ethers.Contract(address, abi, provider);
+
+      // Query the current nonce from blockchain
+      const nonce = await contract.nonce();
+
+      logger.info(`Retrieved nonce for ${address}: ${nonce}`);
+      return Number(nonce);
+    } catch (error) {
+      logger.error(
+        `Failed to get nonce for ${address}: ${error.message}. ` +
+        `Account may not be deployed yet.`
+      );
+      throw error;
+    }
   }
 
   private calculateUserOpHash(userOp: UserOperation): string {

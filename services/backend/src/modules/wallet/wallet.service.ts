@@ -6,8 +6,8 @@ import { Wallet } from './entities/wallet.entity';
 import { EthereumService } from '../blockchain/ethereum.service';
 import { SolanaService } from '../blockchain/solana.service';
 import { PolygonService } from '../blockchain/polygon.service';
+import { EncryptionService } from '../../common/encryption/encryption.service';
 import { logger } from '../../common/logger';
-import * as crypto from 'crypto';
 
 @Injectable()
 export class WalletService {
@@ -17,6 +17,7 @@ export class WalletService {
     private ethereumService: EthereumService,
     private solanaService: SolanaService,
     private polygonService: PolygonService,
+    private encryptionService: EncryptionService,
   ) {}
 
   async createWallet(userId: string, chain: string): Promise<Wallet> {
@@ -57,17 +58,12 @@ export class WalletService {
           throw new BadRequestException(`Unsupported chain: ${chain}`);
       }
 
-      // Encrypt private key (simple encryption; use KMS in production)
-      const encryptionKey = process.env.ENCRYPTION_KEY || 'dev-secret-key';
-      const iv = crypto.randomBytes(16);
-      const cipher = crypto.createCipheriv(
-        'aes-256-cbc',
-        Buffer.from(encryptionKey.padEnd(32).substring(0, 32)),
-        iv,
+      // Encrypt private key with per-user key
+      // Uses AES-256-GCM with per-user key derived from master key
+      const encryptedPrivateKey = await this.encryptionService.encrypt(
+        privateKey,
+        userId,
       );
-      let encrypted = cipher.update(privateKey, 'utf8', 'hex');
-      encrypted += cipher.final('hex');
-      const encryptedPrivateKey = iv.toString('hex') + ':' + encrypted;
 
       // Create wallet record
       const wallet = this.walletRepository.create({
