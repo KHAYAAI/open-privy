@@ -8,48 +8,49 @@ import { RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible';
  */
 @Injectable()
 export class RateLimitMiddleware implements NestMiddleware {
+  // NOTE: RateLimiterMemory is per-process/in-memory. Behind multiple replicas
+  // each pod keeps its own counters, so limits are per-pod, not global, and
+  // reset on restart. For production this should be swapped for
+  // RateLimiterRedis (shared store) — tracked as a follow-up. The `blockDuration`
+  // option is in SECONDS (the previous `blockDurationMs` key was silently ignored).
+
   // Global rate limiter: 100 requests per minute per IP
   private rateLimiterByIP = new RateLimiterMemory({
     points: 100,
     duration: 60,
-    blockDurationMs: 300000, // 5 minutes block
-  });
-
-  // Per-user rate limiter: 1000 requests per minute
-  private rateLimiterByUser = new RateLimiterMemory({
-    points: 1000,
-    duration: 60,
+    blockDuration: 300, // 5 minutes block
   });
 
   // Sensitive endpoints: stricter limits
   private rateLimiterLogin = new RateLimiterMemory({
     points: 5, // 5 attempts
     duration: 60, // per minute
-    blockDurationMs: 900000, // 15 minutes block
+    blockDuration: 900, // 15 minutes block
   });
 
   private rateLimiterSignup = new RateLimiterMemory({
     points: 3, // 3 signups
     duration: 3600, // per hour
-    blockDurationMs: 3600000, // 1 hour block
+    blockDuration: 3600, // 1 hour block
   });
 
   use(req: Request, res: Response, next: NextFunction) {
     const ipKey = req.ip || 'unknown';
-    const userKey = req.user?.id || ipKey;
 
-    // Apply rate limiting
-    this.applyRateLimit(req, res, ipKey, userKey)
+    // This middleware runs before the auth guard populates req.user, so all
+    // limiting is keyed by IP. Per-authenticated-user limits belong at the
+    // guard/controller layer where the identity is known.
+    this.applyRateLimit(req, res, ipKey)
       .then(() => {
         next();
       })
       .catch((err) => {
-        const retryAfter = Math.ceil(err.msBeforeNext / 1000);
+        const retryAfter = Math.ceil((err?.msBeforeNext ?? 60000) / 1000);
         res.set('Retry-After', retryAfter.toString());
         res.status(HttpStatus.TOO_MANY_REQUESTS).json({
           statusCode: 429,
           error: 'Too many requests',
-          retryAfter: retryAfter,
+          retryAfter,
           message: 'Rate limit exceeded. Please try again later.',
         });
       });
@@ -59,17 +60,9 @@ export class RateLimitMiddleware implements NestMiddleware {
     req: Request,
     res: Response,
     ipKey: string,
-    userKey: string,
   ): Promise<void> {
-    // Global rate limit by IP
-    await this.rateLimiterByIP.consume(ipKey);
-
-    // Per-user rate limit
-    if (req.user) {
-      await this.rateLimiterByUser.consume(userKey);
-    }
-
-    // Stricter limits for sensitive endpoints
+    // Stricter limits for sensitive endpoints (consumed first so a burst of
+    // login/signup attempts is blocked even within the global budget).
     if (this.isSensitiveEndpoint(req)) {
       if (req.path.includes('login')) {
         await this.rateLimiterLogin.consume(ipKey);
@@ -78,10 +71,16 @@ export class RateLimitMiddleware implements NestMiddleware {
       }
     }
 
-    // Add rate limit headers to response
+    // Global rate limit by IP
+    const result: RateLimiterRes = await this.rateLimiterByIP.consume(ipKey);
+
+    // Real rate-limit headers derived from the limiter state
     res.set('X-RateLimit-Limit', '100');
-    res.set('X-RateLimit-Remaining', '99');
-    res.set('X-RateLimit-Reset', Math.ceil(Date.now() / 1000 + 60).toString());
+    res.set('X-RateLimit-Remaining', result.remainingPoints.toString());
+    res.set(
+      'X-RateLimit-Reset',
+      Math.ceil((Date.now() + result.msBeforeNext) / 1000).toString(),
+    );
   }
 
   private isSensitiveEndpoint(req: Request): boolean {
@@ -113,7 +112,7 @@ export function RateLimit(
     const limiter = new RateLimiterMemory({
       points,
       duration,
-      blockDurationMs,
+      blockDuration: Math.ceil(blockDurationMs / 1000), // option is in seconds
     });
 
     descriptor.value = async function (...args: any[]) {

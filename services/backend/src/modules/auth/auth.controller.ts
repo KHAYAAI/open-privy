@@ -22,7 +22,7 @@ export class AuthController {
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
-  async getMe(@Req() req) {
+  async getMe(@Req() req: any) {
     const user = await this.authService.validateUser(req.user.userId);
     return {
       id: user.id,

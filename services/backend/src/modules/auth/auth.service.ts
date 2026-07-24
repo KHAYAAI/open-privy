@@ -10,8 +10,8 @@ import { logger } from '../../common/logger';
 @Injectable()
 export class AuthService {
   private supabase = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_KEY,
+    process.env.SUPABASE_URL || '',
+    process.env.SUPABASE_KEY || '',
   );
 
   constructor(
@@ -37,7 +37,7 @@ export class AuthService {
       const user = this.usersRepository.create({
         id: data.user.id,
         email: dto.email,
-        username: dto.username || null,
+        username: dto.username || undefined,
         emailVerified: false,
       });
 
