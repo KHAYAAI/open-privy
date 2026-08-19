@@ -20,8 +20,14 @@ async function bootstrap() {
     app.use(express.json({ limit: '1mb' }));
     app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
-    // Rate limiting middleware
-    app.use(new RateLimitMiddleware().use.bind(new RateLimitMiddleware()));
+    // Behind the ALB/ingress, trust the proxy so req.ip is the real client IP
+    // (rate limiting keys on it).
+    const httpAdapter = app.getHttpAdapter();
+    httpAdapter.getInstance().set('trust proxy', 1);
+
+    // Rate limiting middleware (single instance — Redis-backed when REDIS_URL set)
+    const rateLimiter = new RateLimitMiddleware();
+    app.use(rateLimiter.use.bind(rateLimiter));
 
     app.useGlobalPipes(
       new ValidationPipe({

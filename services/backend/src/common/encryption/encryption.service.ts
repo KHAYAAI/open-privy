@@ -1,6 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional, Inject } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { logger } from '../logger';
+
+/** DI token for the resolved master key material (base64 string). */
+export const MASTER_KEY_MATERIAL = 'ENCRYPTION_MASTER_KEY_MATERIAL';
 
 /**
  * Encryption service for sensitive data (private keys).
@@ -21,28 +24,34 @@ export class EncryptionService {
   private readonly PBKDF2_ITERATIONS = 100000;
   private readonly AUTH_TAG_LENGTH = 16; // 128 bits
 
-  constructor() {
-    this.initializeMasterKey();
+  /**
+   * @param providedKey Base64 master key, injected by EncryptionModule (which
+   * may have resolved it from AWS Secrets Manager). When constructed directly
+   * (e.g. in tests) it falls back to the ENCRYPTION_MASTER_KEY env var.
+   */
+  constructor(
+    @Optional() @Inject(MASTER_KEY_MATERIAL) providedKey?: string,
+  ) {
+    this.initializeMasterKey(providedKey ?? process.env.ENCRYPTION_MASTER_KEY);
   }
 
   /**
-   * Initialize master encryption key from environment.
-   * MUST be set via AWS Secrets Manager in production.
+   * Initialize master encryption key. In production this material comes from
+   * AWS Secrets Manager (see master-key.loader.ts); locally it may come from an
+   * env var. Either way it must be base64 that decodes to exactly 32 bytes.
    */
-  private initializeMasterKey(): void {
-    const masterKeyEnv = process.env.ENCRYPTION_MASTER_KEY;
-
-    if (!masterKeyEnv) {
+  private initializeMasterKey(rawKey: string | undefined): void {
+    if (!rawKey) {
       throw new Error(
-        'ENCRYPTION_MASTER_KEY not set. ' +
-        'Store in AWS Secrets Manager: ' +
-        'aws secretsmanager create-secret --name openprivy/encryption/master-key'
+        'ENCRYPTION_MASTER_KEY not set. In production provide it via ' +
+        'ENCRYPTION_MASTER_KEY_SECRET_ARN (AWS Secrets Manager). Locally set ' +
+        'ENCRYPTION_MASTER_KEY to a base64 32-byte key (openssl rand -base64 32).'
       );
     }
 
     // Master key should be base64 encoded 32-byte key
     try {
-      this.masterKey = Buffer.from(masterKeyEnv, 'base64');
+      this.masterKey = Buffer.from(rawKey, 'base64');
 
       if (this.masterKey.length !== this.KEY_LENGTH) {
         throw new Error(

@@ -13,11 +13,17 @@
     "test:cov": "jest --coverage",
     "test:e2e": "jest --testPathPattern=test/e2e",
     "test:integration": "jest --config jest-integration.config.js",
+    "typeorm": "typeorm-ts-node-commonjs -d src/data-source.ts",
+    "migration:generate": "typeorm-ts-node-commonjs migration:generate -d src/data-source.ts",
+    "migration:run": "typeorm-ts-node-commonjs migration:run -d src/data-source.ts",
+    "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/data-source.ts",
+    "migration:run:prod": "typeorm migration:run -d dist/data-source.js",
     "lint": "eslint \"src/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\"",
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.556.0",
     "@nestjs/axios": "^3.0.2",
     "@nestjs/common": "^10.2.0",
     "@nestjs/config": "^3.2.0",
@@ -62,6 +68,7 @@
     "prettier": "^3.0.0",
     "supertest": "^6.3.4",
     "ts-jest": "^29.1.1",
+    "ts-node": "^10.9.2",
     "typescript": "^5.2.0"
   }
 }
