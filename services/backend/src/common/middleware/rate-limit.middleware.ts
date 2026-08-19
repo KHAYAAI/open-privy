@@ -25,13 +25,20 @@ export class RateLimitMiddleware implements NestMiddleware {
   private rateLimiterLogin: RateLimiterAbstract;
   private rateLimiterSignup: RateLimiterAbstract;
 
+  // Limits are env-tunable so ops can adjust without a redeploy (and load tests
+  // can raise them). Defaults are the production values.
+  private readonly ipPoints = Number(process.env.RATE_LIMIT_IP_POINTS) || 100;
+  private readonly ipDuration = Number(process.env.RATE_LIMIT_IP_DURATION) || 60;
+  private readonly loginPoints = Number(process.env.RATE_LIMIT_LOGIN_POINTS) || 5;
+  private readonly signupPoints = Number(process.env.RATE_LIMIT_SIGNUP_POINTS) || 3;
+
   constructor() {
     const redisUrl = process.env.REDIS_URL;
 
     // Memory fallbacks (also used as insuranceLimiter for the Redis limiters).
-    const memIP = new RateLimiterMemory({ points: 100, duration: 60, blockDuration: 300 });
-    const memLogin = new RateLimiterMemory({ points: 5, duration: 60, blockDuration: 900 });
-    const memSignup = new RateLimiterMemory({ points: 3, duration: 3600, blockDuration: 3600 });
+    const memIP = new RateLimiterMemory({ points: this.ipPoints, duration: this.ipDuration, blockDuration: 300 });
+    const memLogin = new RateLimiterMemory({ points: this.loginPoints, duration: 60, blockDuration: 900 });
+    const memSignup = new RateLimiterMemory({ points: this.signupPoints, duration: 3600, blockDuration: 3600 });
 
     if (redisUrl) {
       const client = createClient({ url: redisUrl });
@@ -43,15 +50,15 @@ export class RateLimitMiddleware implements NestMiddleware {
       this.rateLimiterByIP = new RateLimiterRedis({
         storeClient: client,
         keyPrefix: 'rl:ip',
-        points: 100,
-        duration: 60,
+        points: this.ipPoints,
+        duration: this.ipDuration,
         blockDuration: 300,
         insuranceLimiter: memIP,
       });
       this.rateLimiterLogin = new RateLimiterRedis({
         storeClient: client,
         keyPrefix: 'rl:login',
-        points: 5,
+        points: this.loginPoints,
         duration: 60,
         blockDuration: 900,
         insuranceLimiter: memLogin,
@@ -59,7 +66,7 @@ export class RateLimitMiddleware implements NestMiddleware {
       this.rateLimiterSignup = new RateLimiterRedis({
         storeClient: client,
         keyPrefix: 'rl:signup',
-        points: 3,
+        points: this.signupPoints,
         duration: 3600,
         blockDuration: 3600,
         insuranceLimiter: memSignup,
@@ -114,7 +121,7 @@ export class RateLimitMiddleware implements NestMiddleware {
     const result: RateLimiterRes = await this.rateLimiterByIP.consume(ipKey);
 
     // Real rate-limit headers derived from the limiter state
-    res.set('X-RateLimit-Limit', '100');
+    res.set('X-RateLimit-Limit', this.ipPoints.toString());
     res.set('X-RateLimit-Remaining', result.remainingPoints.toString());
     res.set(
       'X-RateLimit-Reset',
