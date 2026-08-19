@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import helmet from 'helmet';
 import * as express from 'express';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { createLogger } from './common/logger';
 import { RateLimitMiddleware } from './common/middleware/rate-limit.middleware';
@@ -19,6 +20,9 @@ async function bootstrap() {
     // Request size limits
     app.use(express.json({ limit: '1mb' }));
     app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+    // Parse cookies (WorkOS session + OAuth state cookies)
+    app.use(cookieParser());
 
     // Behind the ALB/ingress, trust the proxy so req.ip is the real client IP
     // (rate limiting keys on it).
