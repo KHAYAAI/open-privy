@@ -47,9 +47,19 @@ PostgreSQL 16, and Redis). Claims are labelled ✅ verified, 🟡 partial, or
 ## The hard gates before real traffic
 
 1. **External security audit** — custody, AA, auth. Independent third party. ❌ (external)
+   Engagement brief ready to send: `docs/SECURITY_AUDIT_BRIEF.md` — scope,
+   priority files, and known gaps, so audit time isn't spent rediscovering
+   what we already know.
 2. **Live testnet ERC-4337 transaction** that lands (no `SIG_VALIDATION_FAILED`).
-   Comparison test written; run it where RPC is allowed, then reconcile
-   `SimpleAccount.sol` to EntryPoint v0.7. ⚠️ blocked here by egress policy.
+   Comparison test written and re-verified against the current implementation
+   (`test/integration/userop-hash.integration.test.ts`); run it where RPC is
+   allowed —
+   `AA_RPC_URL=<sepolia rpc> npx jest test/integration/userop-hash.integration.test.ts`
+   — then reconcile `SimpleAccount.sol` to EntryPoint v0.7. ⚠️ blocked here by
+   egress policy (this sandbox denies outbound RPC by org policy; the AWS MCP
+   connector, which could route around it via a Lambda with normal AWS
+   networking, currently needs re-authorization — a non-interactive session
+   can't complete that OAuth flow).
 3. **Load test** on staging to size RDS/Redis/HPA. 🟡 local baseline captured
    (test/load/RESULTS.md); staging run + write-path (wallet create) still needed.
 4. **Master-key rotation** tooling + dry-run. ❌ (primitive exists; batch tool + drill needed)
@@ -57,7 +67,8 @@ PostgreSQL 16, and Redis). Claims are labelled ✅ verified, 🟡 partial, or
    backup/restore round-trip verified + runbook (`docs/DR_RUNBOOK.md`); the RDS
    PITR + failover legs need a real AWS account.
 6. **Money-transmitter / VASP licensing** for the custodial model — legal, above
-   SOC 2 / PCI. ❌ (counsel)
+   SOC 2 / PCI. ❌ (counsel) Scoping memo ready to send: `docs/LICENSING_SCOPING_MEMO.md`
+   — the custody fact pattern and the specific questions counsel needs to answer.
 
 Deploy procedure: `docs/AWS_PRODUCTION_DEPLOY.md` · DR: `docs/DR_RUNBOOK.md`.
 

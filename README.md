@@ -412,4 +412,6 @@ contributions.
 - `PRODUCTION_STATUS.md` — verified / partial / blocked, with evidence for each
 - `docs/AWS_PRODUCTION_DEPLOY.md` — ordered AWS deployment runbook
 - `docs/DR_RUNBOOK.md` — disaster recovery scenarios and drill checklist
+- `docs/SECURITY_AUDIT_BRIEF.md` — ready-to-send engagement brief for an independent audit
+- `docs/LICENSING_SCOPING_MEMO.md` — ready-to-send scoping memo for counsel on custodial licensing
 - `test/load/RESULTS.md` — measured load-test baseline
