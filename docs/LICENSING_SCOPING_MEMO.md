@@ -48,7 +48,12 @@ Questions for counsel:
    current business decision**.)
 3. **What KYC/AML/CDD obligations attach**, and at what onboarding or
    transaction-volume thresholds? Does wallet creation alone trigger them, or
-   only a transaction of a certain size/type?
+   only a transaction of a certain size/type? *Status update: sanctions
+   screening against an OFAC-SDN-style list is now implemented and wired into
+   every custodial send (fails closed if the list is stale or unsynced) — the
+   exact OFAC schema it parses against has not yet been validated against the
+   live file, and this covers sanctions screening specifically, not full
+   KYC/CDD identity verification, which remains unbuilt.*
 4. **Does the gas-sponsorship (paymaster) mechanism** — the platform paying
    gas on the user's behalf — have any independent regulatory characterization
    (e.g., as a form of value transfer by the platform itself)?

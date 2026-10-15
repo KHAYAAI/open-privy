@@ -6,6 +6,8 @@ import { Transaction } from '../modules/transactions/entities/transaction.entity
 import { AuditLog } from '../common/entities/audit-log.entity';
 import { RecoveryContact } from '../modules/social-recovery/entities/recovery-contact.entity';
 import { RecoveryGuardian } from '../modules/social-recovery/entities/recovery-guardian.entity';
+import { SanctionedAddress } from '../modules/compliance/entities/sanctioned-address.entity';
+import { ComplianceSyncState } from '../modules/compliance/entities/compliance-sync-state.entity';
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -19,6 +21,8 @@ export const typeOrmConfig: TypeOrmModuleOptions = {
     AuditLog,
     RecoveryContact,
     RecoveryGuardian,
+    SanctionedAddress,
+    ComplianceSyncState,
   ],
   // Belt-and-suspenders: also pick up any entity registered via forFeature.
   autoLoadEntities: true,

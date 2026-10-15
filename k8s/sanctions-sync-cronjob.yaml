@@ -1,0 +1,57 @@
+# Refreshes the sanctions address list on a schedule, same pattern as
+# migrate-job.yaml: a run-once Job the CronJob spawns, not an HTTP route —
+# there's no admin/operator role yet to scope a sync-trigger endpoint to.
+#
+# Screening fails closed (see SanctionsService): if this CronJob stops
+# running, custodial sends start being blocked once the list goes stale
+# (SANCTIONS_MAX_AGE_HOURS, default 7 days) rather than silently passing
+# everything through. Alert on this CronJob's failures accordingly.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sanctions-sync
+  namespace: openprivy
+  labels:
+    app: backend
+    component: compliance
+spec:
+  schedule: "0 */6 * * *" # every 6 hours
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: backend
+            component: compliance
+        spec:
+          restartPolicy: Never
+          serviceAccountName: backend
+          containers:
+            - name: sanctions-sync
+              image: openprivy-backend:latest
+              imagePullPolicy: Always
+              command: ["node", "dist/scripts/sync-sanctions-list.js"]
+              envFrom:
+                - configMapRef:
+                    name: backend-config
+                - secretRef:
+                    name: backend-secrets
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                readOnlyRootFilesystem: true
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL

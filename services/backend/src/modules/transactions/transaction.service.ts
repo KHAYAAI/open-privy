@@ -10,6 +10,7 @@ import { ethers } from 'ethers';
 import { Transaction } from './entities/transaction.entity';
 import { EthereumService } from '../blockchain/ethereum.service';
 import { WalletService } from '../wallet/wallet.service';
+import { SanctionsService } from '../compliance/sanctions.service';
 import { logger } from '../../common/logger';
 import * as crypto from 'crypto';
 
@@ -20,6 +21,7 @@ export class TransactionService {
     private txRepository: Repository<Transaction>,
     private ethereumService: EthereumService,
     private walletService: WalletService,
+    private sanctionsService: SanctionsService,
   ) {}
 
   async createSigningRequest(
@@ -81,6 +83,20 @@ export class TransactionService {
         throw new BadRequestException('Transaction does not belong to this user');
       }
 
+      // Screen the decoded destination, not just raw calldata — a signed tx
+      // is attacker-opaque until parsed, and sanctions screening on an opaque
+      // blob is no screening at all.
+      const decoded = ethers.Transaction.from(signedTx);
+      if (decoded.to) {
+        const screening = await this.sanctionsService.screenAddress(decoded.to, tx.chain);
+        if (screening.blocked) {
+          tx.status = 'failed';
+          await this.txRepository.save(tx);
+          logger.error(`Blocked broadcast to ${decoded.to}: ${screening.reason}`);
+          throw new ForbiddenException(screening.reason || 'Destination address is blocked');
+        }
+      }
+
       // Broadcast to blockchain
       const txHash = await this.ethereumService.broadcastTransaction(signedTx);
 
@@ -136,6 +152,12 @@ export class TransactionService {
     }
     if (value <= 0n) {
       throw new BadRequestException('Amount must be greater than zero');
+    }
+
+    const screening = await this.sanctionsService.screenAddress(to, wallet.chain);
+    if (screening.blocked) {
+      logger.error(`Blocked custodial send to ${to}: ${screening.reason}`);
+      throw new ForbiddenException(screening.reason || 'Destination address is blocked');
     }
 
     const provider = this.ethereumService.getProvider();

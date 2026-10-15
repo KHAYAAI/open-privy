@@ -1,0 +1,53 @@
+name: Recovery Drill
+
+# Proves custody survives a hard process kill and restart with the key
+# re-supplied from its source (Secrets Manager in production) — on every
+# push, not just once by hand. See services/backend/scripts/recovery-drill.sh.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  recovery-drill:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: dev
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install backend dependencies
+        run: npm install --legacy-peer-deps
+        working-directory: services/backend
+
+      - name: Build backend
+        run: npm run build
+        working-directory: services/backend
+
+      - name: Run the recovery drill
+        env:
+          DRILL_DB_USER: app
+          DRILL_DB_PASSWORD: dev
+        run: npm run drill:recovery
+        working-directory: services/backend

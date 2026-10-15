@@ -235,7 +235,13 @@ POST   /defi/stake/build
 GET    /health                       # liveness/readiness
 GET    /metrics                      # Prometheus scrape endpoint
 GET    /metrics/info                 # human-readable process info
+GET    /compliance/sanctions/status  # sanctions list sync state (read-only)
 ```
+
+Sanctions screening against an OFAC-SDN-style list runs on every custodial
+send and fails closed if the list has never synced or is stale (default max
+age 7 days). The sync itself is a scheduled k8s CronJob, not an HTTP route —
+see `k8s/sanctions-sync-cronjob.yaml`.
 
 ## Database schema (current)
 

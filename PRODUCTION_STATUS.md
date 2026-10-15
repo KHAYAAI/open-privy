@@ -30,6 +30,8 @@ PostgreSQL 16, and Redis). Claims are labelled ✅ verified, 🟡 partial, or
 | DB schema via migrations (no synchronize in prod) | ✅ | 2 migrations apply on a fresh DB (initial + workosUserId) |
 | Backup / restore (DR round-trip) | ✅ | `db-backup.sh`→`db-restore.sh` verified: row counts match, ciphertext intact |
 | Load baseline (single instance) | ✅ | ~3.3k req/s `/health`, ~1.1k req/s `/auth/me` (JWT+DB); see test/load/RESULTS.md |
+| Recovery drill (kill + restart, re-supplied key) | ✅ | automated, in CI on every push — kills the server with SIGKILL, restarts with the same master key, proves decrypt+sign recovers the correct address via the real production code path; negative control (wrong key) proves it's not vacuous. `.github/workflows/recovery-drill.yml` |
+| Sanctions/OFAC screening on custodial sends | ✅ | DB-backed, fails closed if never-synced or stale; wired into both the custodial send and client-signed broadcast paths; proven over real HTTP against a live server (sanctioned address → 403 with reason; clean address → passes screening). Real OFAC schema **not yet confirmed live** — this sandbox can't reach treasury.gov; verify column names against the live file before relying on it. See `docs/SECURITY_AUDIT_BRIEF.md` |
 | Encryption master key from Secrets Manager | 🟡 | code path wired (IRSA + ARN); needs a real AWS account to exercise |
 | ERC-4337 / account abstraction end-to-end | ❌ | v0.7-spec hash + on-chain comparison test written (`test/integration/userop-hash.integration.test.ts`); UNRUN here — egress policy blocks external RPC. `SimpleAccount.sol` nonce model still needs reconciling |
 | Supabase-backed auth end-to-end | ⚪ | superseded by WorkOS; Supabase now lazy/optional |
@@ -64,8 +66,10 @@ PostgreSQL 16, and Redis). Claims are labelled ✅ verified, 🟡 partial, or
    (test/load/RESULTS.md); staging run + write-path (wallet create) still needed.
 4. **Master-key rotation** tooling + dry-run. ❌ (primitive exists; batch tool + drill needed)
 5. **DR drill** — RDS PITR + Multi-AZ failover + confirm decrypt. 🟡 logical
-   backup/restore round-trip verified + runbook (`docs/DR_RUNBOOK.md`); the RDS
-   PITR + failover legs need a real AWS account.
+   backup/restore round-trip verified + runbook (`docs/DR_RUNBOOK.md`); now
+   also an **automated** kill/restart drill running in CI on every push
+   (`.github/workflows/recovery-drill.yml`), not just a one-time manual check.
+   The RDS PITR + Multi-AZ failover legs specifically still need a real AWS account.
 6. **Money-transmitter / VASP licensing** for the custodial model — legal, above
    SOC 2 / PCI. ❌ (counsel) Scoping memo ready to send: `docs/LICENSING_SCOPING_MEMO.md`
    — the custody fact pattern and the specific questions counsel needs to answer.

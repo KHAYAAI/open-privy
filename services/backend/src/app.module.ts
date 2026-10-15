@@ -12,6 +12,7 @@ import { AccountAbstractionModule } from './modules/account-abstraction/account-
 import { DefiModule } from './modules/defi/defi.module';
 import { SocialRecoveryModule } from './modules/social-recovery/social-recovery.module';
 import { MonitoringModule } from './modules/monitoring/monitoring.module';
+import { ComplianceModule } from './modules/compliance/compliance.module';
 import { HealthController } from './common/health.controller';
 import { EncryptionModule } from './common/encryption/encryption.module';
 import { typeOrmConfig } from './config/typeorm.config';
@@ -35,6 +36,7 @@ import { jwtConfig } from './config/jwt.config';
     DefiModule,
     SocialRecoveryModule,
     MonitoringModule,
+    ComplianceModule,
   ],
   controllers: [HealthController],
 })
