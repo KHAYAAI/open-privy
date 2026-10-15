@@ -12,7 +12,10 @@ import { EthereumService } from '../blockchain/ethereum.service';
 import { SolanaService } from '../blockchain/solana.service';
 import { PolygonService } from '../blockchain/polygon.service';
 import { EncryptionService } from '../../common/encryption/encryption.service';
+import { Pkcs11Service } from '../../common/signing/pkcs11.service';
+import { HsmSigningKey } from '../../common/signing/hsm-signing-key';
 import { logger } from '../../common/logger';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class WalletService {
@@ -23,9 +26,14 @@ export class WalletService {
     private solanaService: SolanaService,
     private polygonService: PolygonService,
     private encryptionService: EncryptionService,
+    private pkcs11Service: Pkcs11Service,
   ) {}
 
-  async createWallet(userId: string, chain: string): Promise<Wallet> {
+  async createWallet(
+    userId: string,
+    chain: string,
+    signingMode: 'software' | 'hsm' = 'software',
+  ): Promise<Wallet> {
     try {
       // Check if wallet already exists for this chain
       const existing = await this.walletRepository.findOne({
@@ -36,6 +44,10 @@ export class WalletService {
         throw new BadRequestException(
           `Wallet already exists for chain ${chain}`,
         );
+      }
+
+      if (signingMode === 'hsm') {
+        return this.createHsmWallet(userId, chain);
       }
 
       let address: string;
@@ -79,6 +91,7 @@ export class WalletService {
         chain,
         publicKey,
         encryptedPrivateKey,
+        signingMode: 'software',
         recoveryEmail: null,
         isActive: true,
       });
@@ -92,6 +105,52 @@ export class WalletService {
       logger.error(`Failed to create wallet: ${error.message}`);
       throw error;
     }
+  }
+
+  /**
+   * Create a wallet whose key is generated non-extractable on a PKCS#11
+   * token (CloudHSM/Luna/YubiHSM/SoftHSM2), instead of encrypted in the
+   * database. There is no plaintext key at any point after generation —
+   * encryptedPrivateKey stays null for the life of this wallet.
+   *
+   * EVM only: the single-key HSM path here signs secp256k1 digests, which
+   * covers Ethereum/Polygon; Solana's Ed25519 keys are a different curve and
+   * aren't wired to this path.
+   */
+  private async createHsmWallet(userId: string, chain: string): Promise<Wallet> {
+    const normalizedChain = chain.toLowerCase();
+    if (normalizedChain !== 'ethereum' && normalizedChain !== 'polygon') {
+      throw new BadRequestException(
+        `HSM signing mode does not support chain: ${chain}`,
+      );
+    }
+
+    if (!this.pkcs11Service.isConfigured()) {
+      throw new BadRequestException(
+        'HSM signing mode requested but no PKCS#11 module is configured (PKCS11_MODULE_PATH)',
+      );
+    }
+
+    const session = this.pkcs11Service.getSession();
+    const hsmKeyLabel = `openprivy-${userId}-${crypto.randomUUID()}`;
+    const signingKey = HsmSigningKey.generate(session, hsmKeyLabel);
+    const address = ethers.computeAddress(signingKey.publicKey);
+
+    const wallet = this.walletRepository.create({
+      userId,
+      address,
+      chain,
+      publicKey: signingKey.publicKey,
+      encryptedPrivateKey: null,
+      signingMode: 'hsm',
+      hsmKeyLabel,
+      recoveryEmail: null,
+      isActive: true,
+    });
+
+    await this.walletRepository.save(wallet);
+    logger.info(`HSM wallet created for user ${userId} on chain ${chain} (label=${hsmKeyLabel})`);
+    return wallet;
   }
 
   async getWallet(userId: string, chain?: string): Promise<Wallet | null> {
@@ -171,6 +230,12 @@ export class WalletService {
       throw new ForbiddenException('Wallet does not belong to this user');
     }
 
+    if (wallet.signingMode === 'hsm') {
+      throw new BadRequestException(
+        'Wallet is HSM-signed; its key is not extractable and has no plaintext form',
+      );
+    }
+
     if (!wallet.encryptedPrivateKey) {
       throw new BadRequestException('Wallet has no key material to decrypt');
     }
@@ -179,15 +244,19 @@ export class WalletService {
   }
 
   /**
-   * Build an ethers Wallet (signer) connected to the given provider for a
-   * custodial EVM wallet. Used by the transaction service to sign and broadcast
-   * on the user's behalf.
+   * Build a signer connected to the given provider for a custodial EVM
+   * wallet. Used by the transaction service to sign and broadcast on the
+   * user's behalf. Transparently branches on the wallet's signing mode:
+   * software wallets decrypt a key into an ethers.Wallet as before;
+   * HSM wallets never produce a plaintext key at all — signing happens on
+   * the token via HsmSigningKey, wrapped in ethers' own BaseWallet so the
+   * caller (sendTransaction) sees an identical interface either way.
    */
   async getEvmSigner(
     walletId: string,
     userId: string,
     provider: ethers.Provider,
-  ): Promise<ethers.Wallet> {
+  ): Promise<ethers.Signer> {
     const wallet = await this.getWalletById(walletId);
 
     if (wallet.userId !== userId) {
@@ -199,6 +268,19 @@ export class WalletService {
       throw new BadRequestException(
         `getEvmSigner does not support chain: ${wallet.chain}`,
       );
+    }
+
+    if (wallet.signingMode === 'hsm') {
+      if (!wallet.hsmKeyLabel) {
+        throw new BadRequestException('HSM wallet is missing its key label');
+      }
+      const session = this.pkcs11Service.getSession();
+      const signingKey = HsmSigningKey.load(session, wallet.hsmKeyLabel);
+      // BaseWallet's constructor is nominally typed to the concrete
+      // ethers.SigningKey class, but at runtime it only ever calls
+      // `.sign(digest)` and reads `.publicKey` — exactly what HsmSigningKey
+      // implements. This cast reflects that real (duck-typed) contract.
+      return new ethers.BaseWallet(signingKey as unknown as ethers.SigningKey, provider);
     }
 
     const privateKey = await this.getDecryptedPrivateKey(walletId, userId);

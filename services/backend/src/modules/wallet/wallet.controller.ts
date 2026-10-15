@@ -11,13 +11,18 @@ export class WalletController {
   @Post('create')
   async createWallet(@Req() req: any, @Body() dto: CreateWalletDto) {
     const userId = req.user.userId;
-    const wallet = await this.walletService.createWallet(userId, dto.chain);
+    const wallet = await this.walletService.createWallet(
+      userId,
+      dto.chain,
+      dto.signingMode,
+    );
     // Never expose encryptedPrivateKey (or the raw entity) over the API.
     return {
       id: wallet.id,
       address: wallet.address,
       chain: wallet.chain,
       publicKey: wallet.publicKey,
+      signingMode: wallet.signingMode,
       createdAt: wallet.createdAt,
     };
   }

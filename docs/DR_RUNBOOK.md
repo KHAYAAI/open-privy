@@ -65,6 +65,24 @@ identical row counts, with `encryptedPrivateKey` values intact.
    primitive exists; do not rotate the secret without it.)*
 3. Rotate JWT_SECRET too (invalidates outstanding sessions).
 
+## Scenario E — HSM-signed wallets (opt-in `signingMode: "hsm"`)
+
+**This scenario is NOT covered by any of the above.** An HSM wallet has no
+`encryptedPrivateKey` at all — its key exists only inside the PKCS#11 token
+(CloudHSM/Luna/YubiHSM), referenced by `hsmKeyLabel`. Restoring the Postgres
+database restores the *reference* to that key, not the key itself.
+
+- If the **database** is lost and restored from backup: HSM wallets recover
+  fully, same as software wallets — `hsmKeyLabel` is just a row.
+- If the **HSM/token itself** is lost (not the database): HSM wallets are
+  **permanently unrecoverable** unless the HSM vendor's own backup/cloning
+  mechanism was used (e.g., CloudHSM cluster replication, Luna backup HSMs).
+  This is a vendor-specific procedure outside this repo's scope — confirm it
+  exists and is tested *before* creating any HSM-mode wallet holding real value.
+- The master-key-rotation concern in Scenario D does not apply to HSM wallets
+  at all — there is no software master key protecting them. This is a genuine
+  advantage of the HSM path, not just a different failure mode.
+
 ## Quarterly DR drill checklist
 
 - [ ] PITR restore to a scratch instance completes within RTO.
@@ -72,4 +90,7 @@ identical row counts, with `encryptedPrivateKey` values intact.
 - [ ] **Decrypt a wallet from the restored DB** using the live master key.
 - [ ] Backend reconnects and serves `/health` 200 against the restored DB.
 - [ ] Redis loss tolerated (limits reset, logins recover).
+- [ ] If any HSM-mode wallets exist: confirm the HSM vendor's own
+      backup/replication is configured and tested — Postgres backups alone
+      do not protect them.
 - [ ] Findings logged; runbook updated.

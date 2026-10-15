@@ -176,6 +176,7 @@ POST   /auth/logout
 ### Wallet
 ```
 POST   /wallet/create                    # generates + encrypts a key, returns no key material
+                                          #   body: { chain, signingMode?: "software"|"hsm" }
 GET    /wallet/get
 GET    /wallet/list
 GET    /wallet/:walletId/balance
@@ -251,7 +252,9 @@ links a WorkOS identity to this account), `username`, `avatarUrl`,
 
 **wallets** — `id` (uuid PK), `userId` (FK), `address` (unique), `chain`
 (`ethereum`/`solana`/`polygon`), `publicKey`, `encryptedPrivateKey`
-(`iv:authTag:ciphertext`, AES-256-GCM), `recoveryEmail`, `isActive`
+(`iv:authTag:ciphertext`, AES-256-GCM — null for HSM-mode wallets),
+`signingMode` (`software`/`hsm`), `hsmKeyLabel` (null unless HSM-mode),
+`recoveryEmail`, `isActive`
 
 **transactions** — `id` (uuid PK), `userId`/`walletId` (FK), `chain`, `txHash`,
 `fromAddress`, `toAddress`, `amount`, `status`, `metadata` (jsonb)
@@ -276,13 +279,24 @@ What's implemented and verified:
 - **Redis-backed rate limiting**, global across replicas, env-tunable limits
 - CORS restricted to configured origins; `helmet` security headers
 - Schema via reviewed migrations, not runtime `synchronize`
+- **Sanctions/OFAC screening** on every custodial send, fails closed if the
+  list has never synced or is stale
+- **Automated recovery drill in CI** — kills the server, restarts it with a
+  re-supplied key, and proves signing still recovers the correct address
+  (plus a negative control, so the drill can't pass vacuously)
+- **Optional HSM-backed signing** (`signingMode: "hsm"`) — the key is
+  generated non-extractable on a PKCS#11 token and never exists as plaintext
+  anywhere, verified against a real token (SoftHSM2 locally; CloudHSM/Luna/
+  YubiHSM in production use the same code path)
 
 What's explicitly **not** done yet — see [Launch readiness](#launch-readiness):
 - No independent security audit
 - No live, on-chain-verified ERC-4337 transaction (hash logic is spec-correct
   against EntryPoint v0.7; the on-chain comparison test is written but unrun)
-- No master-key rotation tooling (the primitive exists; batch re-encryption
-  and a rehearsed drill do not)
+- No master-key rotation tooling for software wallets (the primitive exists;
+  batch re-encryption and a rehearsed drill do not — HSM wallets sidestep
+  this concern entirely but introduce their own DR story, see `docs/DR_RUNBOOK.md`)
+- HSM signing not yet exercised against physical hardware, only SoftHSM2
 - No money-transmitter / VASP licensing review for the custodial model
 
 ## Testing

@@ -38,6 +38,15 @@ Key rotation exists as a primitive (`EncryptionService.rotateKey`) but there is
 master key is ever rotated or suspected compromised — flag this explicitly if
 it's in scope.
 
+**An alternative, opt-in path exists per wallet**: `signingMode: "hsm"`
+generates the key non-extractable directly on a PKCS#11 token (CloudHSM/
+Luna/YubiHSM in production; verified here against SoftHSM2) instead of
+encrypting it in the database — see
+`services/backend/src/common/signing/hsm-signing-key.ts`. The master-key
+compromise/rotation concern above does not apply to these wallets at all, at
+the cost of needing the HSM vendor's own backup/replication story for DR
+(not yet tested against physical hardware — see §4 below).
+
 ## 3. Priority order for review
 
 1. **`services/backend/src/common/encryption/encryption.service.ts`** and
@@ -45,7 +54,14 @@ it's in scope.
    resolution (env var locally, Secrets Manager in production).
 2. **`services/backend/src/modules/wallet/wallet.service.ts`** — the only
    decrypt path; ownership checks; whether any other path could be induced to
-   leak key material (error messages, logs, serialization).
+   leak key material (error messages, logs, serialization). Also covers the
+   HSM branch (`createHsmWallet`/`getEvmSigner`'s HSM case) — same ownership
+   checks apply, but there is no plaintext to leak in the first place.
+2b. **`services/backend/src/common/signing/hsm-signing-key.ts`** and
+   **`pkcs11.service.ts`** — the PKCS#11-backed signer: low-S normalization,
+   recovery-id (v) resolution by trial recovery against the token's own
+   public key, and whether the session/login handling could leak the PIN or
+   leave a session open to reuse across tenants.
 3. **`services/backend/src/modules/transactions/transaction.service.ts`** —
    the custodial send path: decrypt → sign → broadcast, and whether an
    authenticated user could ever trigger a signature over a wallet they don't
@@ -85,6 +101,11 @@ it's in scope.
   on real AWS infrastructure (a local Postgres backup/restore round-trip has).
 - **Docker image and CI/CD have not been executed end-to-end** in a real
   environment yet.
+- **HSM signing has only been exercised against SoftHSM2** (a software
+  PKCS#11 implementation), not physical HSM hardware. The signing math
+  (low-S normalization, recovery-id resolution) is hardware-agnostic PKCS#11
+  behavior, but hasn't been confirmed against a specific vendor's quirks
+  (CloudHSM/Luna/YubiHSM).
 - Full current status, with evidence for every claim: `PRODUCTION_STATUS.md`
   at the repo root.
 
