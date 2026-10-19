@@ -303,12 +303,16 @@ What's explicitly **not** done yet — see [Launch readiness](#launch-readiness)
 
 ```bash
 cd services/backend
-npm run test               # unit + correctness + security (35 passing, 1 skipped)
-npm run test:security      # encryption, auth, rate-limit tests only
+npm run test               # unit + correctness + security (59 passing, 1 skipped, 9 suites)
+npm run test:security      # encryption, auth, rate-limit, sanctions, HSM signing tests
 npm run test:correctness   # nonce, UserOp hash, custody round-trip
 npm run test:e2e           # requires a running DB
 npm run lint
 ```
+
+HSM-signing tests run against a real PKCS#11 token (SoftHSM2) if one is
+present at the standard install path, and skip cleanly otherwise. Recovery
+drill: `npm run drill:recovery` (also runs in CI on every push).
 
 Load testing: `test/load/quick-load.sh` (autocannon) and `test/load/staging-load.k6.js`
 (k6 ramp). Measured single-instance baseline in `test/load/RESULTS.md`.

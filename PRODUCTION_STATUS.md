@@ -1,6 +1,6 @@
 # OpenPrivy — Production Status (source of truth)
 
-**Last updated:** 2026-08-19
+**Last updated:** 2026-10-19
 
 This document supersedes the earlier self-certified files
 (`PRODUCTION_READY_SUMMARY.md`, `AUDIT_REPORT_SIMULATION.md`,
@@ -19,7 +19,7 @@ PostgreSQL 16, and Redis). Claims are labelled ✅ verified, 🟡 partial, or
 |---|---|---|
 | Compiles | ✅ | `npm run build` clean (was 435 TS errors before) |
 | Lint | ✅ | `npm run lint` 0 errors |
-| Unit/correctness/security tests | ✅ | 35 passing, 1 skipped (on-chain integration) |
+| Unit/correctness/security tests | ✅ | 59 passing, 1 skipped (on-chain integration), 9 suites — re-verified on a fresh install |
 | Boots in production mode | ✅ | `NODE_ENV=production` against RDS-shaped Postgres |
 | Custodial wallet create → encrypt at rest | ✅ | HTTP e2e; key stored `iv:tag:ciphertext`, not plaintext |
 | Custodial send (decrypt→sign→broadcast) | ✅ (code) / 🟡 (chain) | crypto round-trip tested; live send needs funded key |
@@ -89,8 +89,10 @@ exercises the code exchange (the only untested leg).
 ## Honest one-line summary
 
 The backend is a **real, running, custodial embedded-wallet API** with
-**WorkOS SSO**, production-shaped AWS infrastructure that lints/validates clean, a
-measured load baseline, and a verified backup/restore path. It is **not yet
-launch-certified**: an external audit, the live account-abstraction proof, a
-staging load test, master-key rotation tooling, and the AWS DR legs remain. This
-is "deployable to staging for hardening", not "flip it live to the public".
+**WorkOS SSO**, **sanctions screening**, an **automated recovery drill**, and an
+**optional HSM-backed signing path** — all proven by actually running them, not
+asserted — on top of production-shaped AWS infrastructure that lints/validates
+clean. It is **not yet launch-certified**: an external audit, the live
+account-abstraction proof, a staging load test, master-key rotation tooling for
+software wallets, and the AWS DR legs remain. This is "deployable to staging
+for hardening", not "flip it live to the public".
