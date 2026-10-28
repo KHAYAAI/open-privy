@@ -1,6 +1,6 @@
 # OpenPrivy — Production Status (source of truth)
 
-**Last updated:** 2026-10-19
+**Last updated:** 2026-10-28
 
 This document supersedes the earlier self-certified files
 (`PRODUCTION_READY_SUMMARY.md`, `AUDIT_REPORT_SIMULATION.md`,
@@ -19,7 +19,7 @@ PostgreSQL 16, and Redis). Claims are labelled ✅ verified, 🟡 partial, or
 |---|---|---|
 | Compiles | ✅ | `npm run build` clean (was 435 TS errors before) |
 | Lint | ✅ | `npm run lint` 0 errors |
-| Unit/correctness/security tests | ✅ | 59 passing, 1 skipped (on-chain integration), 9 suites — re-verified on a fresh install |
+| Unit/correctness/security tests | ✅ | 85 backend tests (10 suites) + 12 contract tests, all passing |
 | Boots in production mode | ✅ | `NODE_ENV=production` against RDS-shaped Postgres |
 | Custodial wallet create → encrypt at rest | ✅ | HTTP e2e; key stored `iv:tag:ciphertext`, not plaintext |
 | Custodial send (decrypt→sign→broadcast) | ✅ (code) / 🟡 (chain) | crypto round-trip tested; live send needs funded key |
@@ -27,14 +27,15 @@ PostgreSQL 16, and Redis). Claims are labelled ✅ verified, 🟡 partial, or
 | WorkOS AuthKit SSO (header + cookie) | ✅ | `/auth/workos/authorize` returns valid AuthKit URL; `/auth/me` via Bearer AND `op_session` cookie; tampered cookie → 401 |
 | JWT secret fail-closed | ✅ | no dev fallback in production |
 | Rate limiting (Redis, global, env-tunable) | ✅ | 429 after limit; `rl:*` keys in Redis; limits configurable via env |
-| DB schema via migrations (no synchronize in prod) | ✅ | 2 migrations apply on a fresh DB (initial + workosUserId) |
+| DB schema via migrations (no synchronize in prod) | ✅ | 5 migrations apply on a fresh DB; regenerate shows no drift |
 | Backup / restore (DR round-trip) | ✅ | `db-backup.sh`→`db-restore.sh` verified: row counts match, ciphertext intact |
 | Load baseline (single instance) | ✅ | ~3.3k req/s `/health`, ~1.1k req/s `/auth/me` (JWT+DB); see test/load/RESULTS.md |
 | Recovery drill (kill + restart, re-supplied key) | ✅ | automated, in CI on every push — kills the server with SIGKILL, restarts with the same master key, proves decrypt+sign recovers the correct address via the real production code path; negative control (wrong key) proves it's not vacuous. `.github/workflows/recovery-drill.yml` |
 | Sanctions/OFAC screening on custodial sends | ✅ | DB-backed, fails closed if never-synced or stale; wired into both the custodial send and client-signed broadcast paths; proven over real HTTP against a live server (sanctioned address → 403 with reason; clean address → passes screening). Real OFAC schema **not yet confirmed live** — this sandbox can't reach treasury.gov; verify column names against the live file before relying on it. See `docs/SECURITY_AUDIT_BRIEF.md` |
 | HSM-backed signing (opt-in, per wallet) | ✅ | Non-extractable secp256k1 key generated on a real PKCS#11 token (SoftHSM2 here; CloudHSM/Luna/YubiHSM in prod — module path is the only thing that changes). Verified against the real token: key generation, low-S-normalized signing, correct recovery-id resolution, and `load()` round-trip — 6/6 tests passing (`test/security/hsm-signing-key.security.test.ts`). Proven end-to-end over real HTTP: created via `POST /wallet/create {"signingMode":"hsm"}`, DB confirmed to hold no plaintext key, and a real custodial send signed successfully (failed only at the network broadcast hop, same as the software-signing path — this sandbox can't reach external RPC). **Not yet run against physical HSM hardware** — only a software PKCS#11 implementation. |
 | Encryption master key from Secrets Manager | 🟡 | code path wired (IRSA + ARN); needs a real AWS account to exercise |
-| ERC-4337 / account abstraction end-to-end | ❌ | v0.7-spec hash + on-chain comparison test written (`test/integration/userop-hash.integration.test.ts`); UNRUN here — egress policy blocks external RPC. `SimpleAccount.sol` nonce model still needs reconciling |
+| ERC-4337 / gasless transactions | ✅ (local chain) / 🟡 (public testnet) | Contracts rebuilt on the official `@account-abstraction/contracts` 0.7.0 (old ones targeted v0.6 and could never have validated). 12 contract tests against the **real EntryPoint v0.7**; plus an end-to-end test where the backend's `UserOpService` builds and signs a sponsored op that the EntryPoint executes on a local chain (account deploys, transfer lands, paymaster pays gas, second op on nonce 1). CI: `account-abstraction.yml`. Fixed on the way: sponsorship was applied after signing (invalidated every sponsored op), nonce read from the wrong contract, bundler RPC in the wrong format, and **gasless sends skipped sanctions screening**. Still to do: one run on Sepolia against Pimlico (needs network access). |
+| Master-key rotation | ✅ | Zero-downtime: servers hold current + previous keys; `rotate-master-key.js` (dry run by default, `--apply` to write) verifies every wallet derives its own address before writing, is resumable and idempotent. Full rehearsal `npm run drill:rotation` in CI on every push: dry run writes nothing, live rotation while serving, old key retired, every wallet still signs, old key fails, a poisoned row is refused. Procedure: `docs/DR_RUNBOOK.md` Scenario D. Not yet run against a real Secrets Manager secret. |
 | Supabase-backed auth end-to-end | ⚪ | superseded by WorkOS; Supabase now lazy/optional |
 
 ## Infrastructure (AWS)
@@ -53,19 +54,14 @@ PostgreSQL 16, and Redis). Claims are labelled ✅ verified, 🟡 partial, or
    Engagement brief ready to send: `docs/SECURITY_AUDIT_BRIEF.md` — scope,
    priority files, and known gaps, so audit time isn't spent rediscovering
    what we already know.
-2. **Live testnet ERC-4337 transaction** that lands (no `SIG_VALIDATION_FAILED`).
-   Comparison test written and re-verified against the current implementation
-   (`test/integration/userop-hash.integration.test.ts`); run it where RPC is
-   allowed —
-   `AA_RPC_URL=<sepolia rpc> npx jest test/integration/userop-hash.integration.test.ts`
-   — then reconcile `SimpleAccount.sol` to EntryPoint v0.7. ⚠️ blocked here by
-   egress policy (this sandbox denies outbound RPC by org policy; the AWS MCP
-   connector, which could route around it via a Lambda with normal AWS
-   networking, currently needs re-authorization — a non-interactive session
-   can't complete that OAuth flow).
+2. **Live testnet ERC-4337 transaction**. 🟡 Contracts rebuilt for EntryPoint
+   v0.7 and proven against the real EntryPoint on a local chain, driven by the
+   backend's own code (see table). Remaining: deploy factory + paymaster to
+   Sepolia and send one sponsored op through Pimlico, from an environment with
+   RPC access (e.g. the AWS staging cluster).
 3. **Load test** on staging to size RDS/Redis/HPA. 🟡 local baseline captured
    (test/load/RESULTS.md); staging run + write-path (wallet create) still needed.
-4. **Master-key rotation** tooling + dry-run. ❌ (primitive exists; batch tool + drill needed)
+4. **Master-key rotation** tooling + dry-run. ✅ Tool built and rehearsed end to end in CI (see table). Do one real rotation on staging once it exists.
 5. **DR drill** — RDS PITR + Multi-AZ failover + confirm decrypt. 🟡 logical
    backup/restore round-trip verified + runbook (`docs/DR_RUNBOOK.md`); now
    also an **automated** kill/restart drill running in CI on every push
@@ -89,10 +85,12 @@ exercises the code exchange (the only untested leg).
 ## Honest one-line summary
 
 The backend is a **real, running, custodial embedded-wallet API** with
-**WorkOS SSO**, **sanctions screening**, an **automated recovery drill**, and an
-**optional HSM-backed signing path** — all proven by actually running them, not
-asserted — on top of production-shaped AWS infrastructure that lints/validates
-clean. It is **not yet launch-certified**: an external audit, the live
-account-abstraction proof, a staging load test, master-key rotation tooling for
-software wallets, and the AWS DR legs remain. This is "deployable to staging
-for hardening", not "flip it live to the public".
+**WorkOS SSO**, **sanctions screening** (now on gasless sends too), an
+**automated recovery drill**, **zero-downtime master-key rotation**, an
+**optional HSM-backed signing path**, and **gasless ERC-4337 transactions
+proven against the real EntryPoint v0.7**. All of it is proven by running it,
+not asserted, on top of production-shaped AWS infrastructure that
+lints/validates clean. It is **not yet launch-certified**: an external audit,
+licensing, a staging deployment (with its load test, AWS failover drills and
+one public-testnet gasless send), and web/mobile hardening remain. This is
+"deployable to staging for hardening", not "flip it live to the public".

@@ -56,14 +56,41 @@ The restore script prints core-table row counts. Then repoint + redeploy as abov
 `db-restore.sh` (pg_restore --clean into a fresh DB) was verified to reproduce
 identical row counts, with `encryptedPrivateKey` values intact.
 
-## Scenario D — encryption master key compromise
+## Scenario D — master-key rotation (scheduled, or suspected compromise)
 
-1. Generate a new 32-byte master key; store as a new Secrets Manager version.
-2. **Re-encrypt every wallet** with `EncryptionService.rotateKey(old, new)`
-   BEFORE retiring the old version (old ciphertext is undecryptable under the new
-   key otherwise). *(Batch rotation tooling is a tracked follow-up — the
-   primitive exists; do not rotate the secret without it.)*
-3. Rotate JWT_SECRET too (invalidates outstanding sessions).
+Rotation runs **without downtime**. Servers accept a *current* key (encrypts
+everything new) plus *previous* keys (decrypt only), and the batch tool
+re-encrypts every software wallet under the current key, proving each one
+still derives its own address before writing it. Rehearsed end to end on every
+push by `npm run drill:rotation` (`scripts/key-rotation-drill.sh`).
+
+1. **Generate the new key** (never reuse, never derive from the old one):
+   `openssl rand -base64 32`.
+2. **Put both keys in the secret** as a new version of the master-key secret:
+   ```json
+   { "ENCRYPTION_MASTER_KEY": "<NEW>", "ENCRYPTION_MASTER_KEY_PREVIOUS": ["<OLD>"] }
+   ```
+   Keep a copy of the old key somewhere safe until step 6 is done.
+3. **Roll the servers** (`kubectl rollout restart deployment/backend -n openprivy`).
+   Logs show `Encryption master key loaded (id <new-id>, 1 previous key(s) ...)`.
+   Existing wallets keep working; new wallets are written under the new key.
+4. **Dry run** (writes nothing), as a one-off Job/pod with the backend image
+   and the same config: `node dist/scripts/rotate-master-key.js`.
+   Check `"failed": []` and that `"rotated"` matches the number of software wallets.
+5. **Apply**: `node dist/scripts/rotate-master-key.js --apply`. Safe to run
+   while serving traffic and safe to re-run (it resumes; finished rows are
+   skipped). Exit code 1 means some wallets were refused; nothing was written
+   for them. Investigate each id in the report before going further.
+6. **Retire the old key** only after an apply run prints
+   `SAFE_TO_RETIRE_PREVIOUS_KEYS`: remove `ENCRYPTION_MASTER_KEY_PREVIOUS` from
+   the secret, roll the servers, and decrypt-test one wallet.
+7. **Suspected compromise**: also rotate `JWT_SECRET` (invalidates sessions),
+   and treat the old key as burned: funds in wallets whose keys may have been
+   decrypted by an attacker must be moved to new wallets, which rotation alone
+   does not do.
+
+Never delete or overwrite the master-key secret without step 6. Rows still
+under a retired key are permanently undecryptable.
 
 ## Scenario E — HSM-signed wallets (opt-in `signingMode: "hsm"`)
 

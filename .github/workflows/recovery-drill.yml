@@ -51,3 +51,12 @@ jobs:
           DRILL_DB_PASSWORD: dev
         run: npm run drill:recovery
         working-directory: services/backend
+
+      # Full rehearsal of master-key rotation (dry run, live rotation, retire
+      # the old key, negative control, poisoned row). See DR_RUNBOOK Scenario D.
+      - name: Run the key-rotation drill
+        env:
+          DRILL_DB_USER: app
+          DRILL_DB_PASSWORD: dev
+        run: npm run drill:rotation
+        working-directory: services/backend

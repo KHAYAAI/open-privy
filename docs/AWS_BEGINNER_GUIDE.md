@@ -182,8 +182,8 @@ Protect it:
   recoverable for 7–30 days; don't use `--force-delete-without-recovery`.
 - Production: replicate it to a second region (console → the secret →
   **Replicate secret**).
-- Don't rotate it from the console. Rotation must re-encrypt every wallet
-  first (see `docs/DR_RUNBOOK.md`, Scenario D).
+- Don't rotate it from the console or replace its value. Rotation has its own
+  procedure that keeps old wallets readable (`docs/DR_RUNBOOK.md`, Scenario D).
 
 **Check:** console → **Secrets Manager** shows three secrets: the master key,
 `openprivy-staging/rds/password` and `openprivy-staging/redis/url`.

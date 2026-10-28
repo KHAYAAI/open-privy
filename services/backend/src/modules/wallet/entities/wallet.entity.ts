@@ -27,6 +27,12 @@ export class Wallet {
   @Column({ type: 'text', nullable: true })
   encryptedPrivateKey: string | null;
 
+  // Non-secret id of the master key that produced encryptedPrivateKey
+  // (EncryptionService.keyIdOf). Null for HSM wallets and for rows written
+  // before rotation tracking existed; the rotation tool handles both.
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  encryptionKeyId: string | null;
+
   // 'software' (default, AES-256-GCM + per-user key, encryptedPrivateKey
   // populated) or 'hsm' (key generated non-extractable on a PKCS#11 token,
   // referenced by hsmKeyLabel, encryptedPrivateKey left null).

@@ -21,7 +21,9 @@
     "drill:recovery": "bash scripts/recovery-drill.sh",
     "lint": "eslint \"src/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\"",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "drill:rotation": "bash scripts/key-rotation-drill.sh",
+    "rotate:master-key": "node dist/scripts/rotate-master-key.js"
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.556.0",

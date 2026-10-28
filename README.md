@@ -291,11 +291,10 @@ What's implemented and verified:
 
 What's explicitly **not** done yet — see [Launch readiness](#launch-readiness):
 - No independent security audit
-- No live, on-chain-verified ERC-4337 transaction (hash logic is spec-correct
-  against EntryPoint v0.7; the on-chain comparison test is written but unrun)
-- No master-key rotation tooling for software wallets (the primitive exists;
-  batch re-encryption and a rehearsed drill do not — HSM wallets sidestep
-  this concern entirely but introduce their own DR story, see `docs/DR_RUNBOOK.md`)
+- Gasless (ERC-4337) transactions are proven against the real EntryPoint v0.7
+  on a local chain, but not yet sent through a public bundler on Sepolia
+- Master-key rotation is built and rehearsed in CI, but not yet run against a
+  real Secrets Manager secret
 - HSM signing not yet exercised against physical hardware, only SoftHSM2
 - No money-transmitter / VASP licensing review for the custodial model
 
@@ -303,16 +302,25 @@ What's explicitly **not** done yet — see [Launch readiness](#launch-readiness)
 
 ```bash
 cd services/backend
-npm run test               # unit + correctness + security (59 passing, 1 skipped, 9 suites)
-npm run test:security      # encryption, auth, rate-limit, sanctions, HSM signing tests
-npm run test:correctness   # nonce, UserOp hash, custody round-trip
+npm run test               # unit + correctness + security (85 passing, 10 suites)
+npm run test:security      # encryption, key rotation, auth, sanctions, HSM signing tests
+npm run test:correctness   # UserOp construction, sponsorship order, AA screening, custody round-trip
 npm run test:e2e           # requires a running DB
 npm run lint
 ```
 
 HSM-signing tests run against a real PKCS#11 token (SoftHSM2) if one is
-present at the standard install path, and skip cleanly otherwise. Recovery
-drill: `npm run drill:recovery` (also runs in CI on every push).
+present at the standard install path, and skip cleanly otherwise.
+
+Drills (real Postgres + the real server; both run in CI on every push):
+- `npm run drill:recovery`: kill the server, restart, prove wallets still sign
+- `npm run drill:rotation`: full master-key rotation rehearsal (`docs/DR_RUNBOOK.md`, Scenario D)
+
+Contracts and gasless transactions (`services/contracts`):
+```bash
+npx hardhat test           # 12 tests against the real EntryPoint v0.7
+npm run test:aa-e2e        # backend builds + signs a sponsored UserOp; a local EntryPoint executes it
+```
 
 Load testing: `test/load/quick-load.sh` (autocannon) and `test/load/staging-load.k6.js`
 (k6 ramp). Measured single-instance baseline in `test/load/RESULTS.md`.
@@ -379,9 +387,9 @@ writing more code alone — the full ledger with evidence is in
 | Gate | Status |
 |---|---|
 | External security audit (custody, AA, auth) | Not started |
-| Live ERC-4337 transaction confirmed on-chain | Test written, unrun — needs an environment with RPC egress, then a `SimpleAccount.sol` nonce fix for EntryPoint v0.7 |
+| Live ERC-4337 transaction confirmed on-chain | Proven against the real EntryPoint v0.7 on a local chain (in CI); one sponsored send on Sepolia via Pimlico remains |
 | Load test + DR drill on real AWS infrastructure | Local baseline + backup/restore verified; RDS PITR and Multi-AZ failover need a real account |
-| Master-key rotation tooling + rehearsed drill | Rotation primitive exists; batch tooling and drill do not |
+| Master-key rotation tooling + rehearsed drill | Done: zero-downtime tool + full rehearsal in CI; one real rotation on staging remains |
 | Docker image + CI/CD executed end-to-end | Rewritten, unexecuted in this environment |
 | Money-transmitter / VASP licensing review | Not started — custodial key storage may require it depending on jurisdiction |
 

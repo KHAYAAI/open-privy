@@ -33,10 +33,14 @@ A wallet's private key is:
    instance is used immediately to broadcast. Plaintext key material is never
    logged, returned over the API, or persisted outside that call's stack frame.
 
-Key rotation exists as a primitive (`EncryptionService.rotateKey`) but there is
-**no batch tool or rehearsed drill yet** to re-encrypt all wallets if the
-master key is ever rotated or suspected compromised — flag this explicitly if
-it's in scope.
+Master-key rotation is zero-downtime: servers decrypt with the current key or
+any configured previous key (AES-GCM authentication makes a wrong key fail
+deterministically) and encrypt only with the current key. The batch tool
+(`src/scripts/rotate-master-key.ts`, core in `src/common/encryption/key-rotation.ts`)
+re-encrypts each wallet only after proving its key derives its stored address,
+writes with an optimistic-concurrency check, and is rehearsed in CI
+(`scripts/key-rotation-drill.sh`). Please review the retire-the-old-key
+decision logic in particular.
 
 **An alternative, opt-in path exists per wallet**: `signingMode: "hsm"`
 generates the key non-extractable directly on a PKCS#11 token (CloudHSM/
@@ -66,14 +70,16 @@ the cost of needing the HSM vendor's own backup/replication story for DR
    the custodial send path: decrypt → sign → broadcast, and whether an
    authenticated user could ever trigger a signature over a wallet they don't
    own.
-4. **`services/backend/src/modules/account-abstraction/`** — ERC-4337
-   `userOpHash` construction (rewritten to bind all EntryPoint v0.7 fields;
-   **not yet verified on-chain**, see §4) and the paymaster/bundler
-   integration.
-5. **`services/contracts/src/`** — `SimpleAccount.sol`,
-   `SimpleAccountFactory.sol`, the paymaster contract. **Known gap:**
-   `SimpleAccount.sol`'s own nonce handling has not been reconciled against
-   EntryPoint v0.7 semantics — treat this as an open item, not a hidden one.
+4. **`services/backend/src/modules/account-abstraction/`**: ERC-4337 UserOp
+   construction, sponsorship ordering (paymaster data is attached before the
+   owner signs), sanctions screening of decoded destinations including ERC-20
+   recipients, and the v0.7 bundler RPC format. Proven against the real
+   EntryPoint v0.7 on a local chain; not yet against a public bundler.
+5. **`services/contracts/src/`**: `SimpleAccount.sol`, `SimpleAccountFactory.sol`,
+   `OpenPrivyPaymaster.sol`, built on `@account-abstraction/contracts` 0.7.0
+   (UUPS-upgradeable account, EntryPoint-managed nonces, verifying paymaster
+   with an allow-list). Upgrade authorization and the paymaster's signed-hash
+   coverage deserve a close look.
 6. **`services/backend/src/modules/auth/`** — WorkOS AuthKit integration
    (session cookie vs. bearer token), JWT issuance/verification, and whether
    the WorkOS↔local-user identity mapping (`workosUserId`) can be spoofed or
@@ -90,13 +96,12 @@ the cost of needing the HSM vendor's own backup/replication story for DR
 
 ## 4. What we already know is incomplete — don't spend time rediscovering these
 
-- **On-chain AA correctness is unverified.** We have a test
-  (`test/integration/userop-hash.integration.test.ts`) that compares our
-  `userOpHash` computation against the live EntryPoint's own `getUserOpHash`
-  view function — it has not been run against a real RPC endpoint yet.
-  `SimpleAccount.sol` needs a nonce-handling fix for EntryPoint v0.7 before an
-  actual UserOp will validate.
-- **No master-key rotation tooling** beyond the single-record primitive.
+- **Gasless transactions are proven on a local chain only.** The real
+  EntryPoint v0.7 executes ops built and signed by the backend
+  (`services/contracts/scripts/aa-e2e.sh`), but no op has gone through a
+  public bundler (Pimlico) on Sepolia yet.
+- **Master-key rotation has not been run against a real Secrets Manager
+  secret**, only rehearsed with env-var keys against real Postgres.
 - **RDS point-in-time-restore and Multi-AZ failover** have not been exercised
   on real AWS infrastructure (a local Postgres backup/restore round-trip has).
 - **Docker image and CI/CD have not been executed end-to-end** in a real

@@ -80,10 +80,9 @@ Note the returned ARN → this goes into `ENCRYPTION_MASTER_KEY_SECRET_ARN`
 (k8s/backend.yaml ConfigMap). The pod's IRSA role must allow
 `secretsmanager:GetSecretValue` on this ARN.
 
-> Rotation: generate a new 32-byte key, then re-encrypt existing wallet rows with
-> `EncryptionService.rotateKey(old, new)` before flipping the secret. Do not
-> rotate the secret without re-encrypting — existing ciphertext becomes
-> undecryptable. (Rotation tooling is a tracked follow-up; the primitive exists.)
+> Rotation: follow `docs/DR_RUNBOOK.md` Scenario D (zero-downtime: new key as
+> current plus old key as previous, then `rotate-master-key.js --apply`). Never
+> replace the secret's key outright; existing ciphertext becomes undecryptable.
 
 ---
 
