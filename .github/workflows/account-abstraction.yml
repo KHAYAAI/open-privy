@@ -1,0 +1,42 @@
+name: Account Abstraction
+
+# Gasless (ERC-4337) correctness on every push: contract tests against the real
+# EntryPoint v0.7, then the backend's UserOpService building and signing a
+# sponsored UserOp that a local EntryPoint actually executes.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  aa:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install contract dependencies
+        run: npm install --legacy-peer-deps
+        working-directory: services/contracts
+
+      - name: Install backend dependencies
+        run: npm install --legacy-peer-deps
+        working-directory: services/backend
+
+      - name: Compile contracts
+        run: npx hardhat compile
+        working-directory: services/contracts
+
+      - name: Contract tests (real EntryPoint v0.7)
+        run: npx hardhat test
+        working-directory: services/contracts
+
+      - name: Backend -> EntryPoint end-to-end
+        run: npm run test:aa-e2e
+        working-directory: services/contracts

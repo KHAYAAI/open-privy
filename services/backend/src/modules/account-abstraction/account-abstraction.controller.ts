@@ -18,22 +18,27 @@ export class AccountAbstractionController {
     body: {
       senderAddress: string;
       targetAddress: string;
-      callData: string;
+      callData?: string;
+      value?: string;
       gasLimit?: string;
+      initCode?: string;
+      sponsor?: boolean;
     },
   ) {
-    // senderAddress is the user's smart-account (ERC-4337) address, not the
-    // internal userId. It must be a real on-chain address.
-    const userOp = await this.userOpService.buildUserOp(
+    // senderAddress is the user's smart-account (ERC-4337) address. The op is
+    // fully assembled (including sponsorship) before hashing, so the returned
+    // userOpHash is final: sign it and pass the op back unchanged.
+    const { userOp, userOpHash } = await this.userOpService.buildUserOp(
       body.senderAddress,
       body.targetAddress,
-      body.callData,
+      body.callData || '0x',
       body.gasLimit,
+      { value: body.value ? BigInt(body.value) : 0n, initCode: body.initCode, sponsor: body.sponsor },
     );
-
     return {
       userOp,
-      message: 'UserOp built. Sign with private key and send.',
+      userOpHash,
+      message: 'Sign userOpHash (EIP-191 personal_sign) with the account owner key, then call send-userop.',
     };
   }
 
@@ -43,13 +48,10 @@ export class AccountAbstractionController {
     @Body() body: { userOp: any; signature: string },
   ) {
     body.userOp.signature = body.signature;
-
     const result = await this.userOpService.sendUserOp(body.userOp, req.user.userId);
-
     return {
       ...result,
-      message: 'UserOp submitted to bundler. Gas fees sponsored!',
-      gasCost: '$0.00',
+      message: 'UserOp submitted to bundler.',
     };
   }
 
@@ -77,8 +79,7 @@ export class AccountAbstractionController {
     return {
       estimatedGasWei: estimatedCost,
       estimatedGasEth: (Number(estimatedCost) / 1e18).toFixed(6),
-      sponsoredByOpenPrivy: true,
-      userPays: '$0.00',
+      note: 'Upper bound (all gas limits x maxFeePerGas). Paid by the paymaster when sponsored.',
     };
   }
 
