@@ -1,34 +1,40 @@
-import axios, { AxiosInstance } from 'axios';
-import * as SecureStore from 'expo-secure-store';
+import axios, { AxiosError, AxiosInstance } from 'axios';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
+export const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
+
+let currentToken: string | null = null;
+let onUnauthorized: (() => void) | null = null;
+
+/** The token is held in memory after unlock, so requests never re-trigger the biometric prompt. */
+export function setApiSession(token: string | null, handleUnauthorized?: () => void) {
+  currentToken = token;
+  if (handleUnauthorized) onUnauthorized = handleUnauthorized;
+}
 
 export const api: AxiosInstance = axios.create({
   baseURL: API_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  timeout: 20_000,
+  headers: { 'Content-Type': 'application/json' },
 });
 
-// Add auth token to requests
-api.interceptors.request.use(async (config) => {
-  const token = await SecureStore.getItemAsync('auth_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
+api.interceptors.request.use((config) => {
+  if (currentToken) config.headers.Authorization = `Bearer ${currentToken}`;
   return config;
 });
 
-// Handle errors
 api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      SecureStore.deleteItemAsync('auth_token');
-      // Redirect to login (handled by auth store)
-    }
+  (r) => r,
+  (error: AxiosError) => {
+    if (error.response?.status === 401 && currentToken) onUnauthorized?.();
     return Promise.reject(error);
   },
 );
 
-export default api;
+export function errorMessage(err: unknown, fallback = 'Something went wrong. Please try again.'): string {
+  const e = err as AxiosError<{ message?: string | string[] }>;
+  if (!e?.response) return 'Cannot reach OpenPrivy. Check your connection.';
+  const m = e.response.data?.message;
+  if (Array.isArray(m)) return m.join('. ');
+  if (typeof m === 'string' && m.length < 300) return m;
+  return fallback;
+}

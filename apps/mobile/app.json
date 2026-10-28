@@ -11,14 +11,11 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
     "ios": {
       "supportsTabletMode": true,
       "bundleIdentifier": "com.openprivy.wallet",
       "infoPlist": {
-        "NSFaceIDUsageDescription": "We use Face ID to secure your wallet"
+        "NSFaceIDUsageDescription": "OpenPrivy uses Face ID to unlock the app and confirm transfers."
       }
     },
     "android": {
@@ -26,13 +23,15 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.openprivy.wallet"
+      "package": "com.openprivy.wallet",
+      "allowBackup": false
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-local-authentication"
-    ]
+    ],
+    "scheme": "openprivy"
   }
 }

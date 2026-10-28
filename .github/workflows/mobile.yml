@@ -1,0 +1,30 @@
+name: Mobile App
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ['apps/mobile/**', '.github/workflows/mobile.yml']
+  pull_request:
+    branches: [main, develop]
+    paths: ['apps/mobile/**', '.github/workflows/mobile.yml']
+
+jobs:
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --legacy-peer-deps
+      - run: npx tsc --noEmit
+      - run: npx jest
+      # Bundles the real iOS and Android JavaScript (catches missing modules
+      # and Babel/transform errors a type-check cannot).
+      - run: npx expo export --platform ios --platform android --output-dir /tmp/expo-export
+        env:
+          CI: '1'
+          EXPO_PUBLIC_API_URL: https://api.example.invalid

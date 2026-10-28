@@ -1,273 +1,81 @@
-import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  SafeAreaView,
-  ScrollView,
-  Alert,
-  Switch,
-} from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Alert, SafeAreaView, ScrollView, Switch, Text, TouchableOpacity, View } from 'react-native';
+import * as LocalAuthentication from 'expo-local-authentication';
 import { useAuthStore } from '../store/authStore';
+import { isBiometricLockOn, setBiometricLock } from '../lib/secureSession';
+import { colors, ui } from '../theme';
 
-export default function SettingsScreen({ navigation }: any) {
-  const { user, logout } = useAuthStore();
-  const [biometricEnabled, setBiometricEnabled] = useState(true);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+export default function SettingsScreen() {
+  const { user, token, signOut } = useAuthStore();
+  const [lockOn, setLockOn] = useState(false);
+  const [lockAvailable, setLockAvailable] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  const handleLogout = () => {
-    Alert.alert(
-      'Sign Out',
-      'Are you sure you want to sign out?',
-      [
-        {
-          text: 'Cancel',
-          onPress: () => {},
-        },
-        {
-          text: 'Sign Out',
-          onPress: async () => {
-            try {
-              await logout();
-              navigation.replace('Login');
-            } catch (err) {
-              console.error('Logout failed:', err);
-            }
-          },
-        },
-      ],
-    );
-  };
+  useEffect(() => {
+    (async () => {
+      setLockOn(await isBiometricLockOn());
+      setLockAvailable((await LocalAuthentication.hasHardwareAsync()) && (await LocalAuthentication.isEnrolledAsync()));
+    })();
+  }, []);
 
-  const handleCopyAddress = () => {
-    // In a real app, use react-native-clipboard
-    Alert.alert('Address copied to clipboard');
+  const toggleLock = async (next: boolean) => {
+    setBusy(true);
+    try {
+      // Prove it's the device owner before changing how the session is protected.
+      const check = await LocalAuthentication.authenticateAsync({
+        promptMessage: next ? 'Turn on biometric lock' : 'Turn off biometric lock',
+      });
+      if (!check.success) return;
+      await setBiometricLock(next, token);
+      setLockOn(next);
+    } catch {
+      Alert.alert('Could not change the lock', 'Please try again.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView>
-        <View style={styles.header}>
-          <Text style={styles.title}>Settings</Text>
+    <SafeAreaView style={ui.screen}>
+      <ScrollView contentContainerStyle={ui.pad}>
+        <View style={ui.card}>
+          <Text style={ui.label}>Signed in as</Text>
+          <Text style={ui.body}>{user?.email}</Text>
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Account</Text>
-          <View style={styles.sectionContent}>
-            <View style={styles.settingItem}>
-              <View>
-                <Text style={styles.settingLabel}>Email</Text>
-                <Text style={styles.settingValue}>{user?.email}</Text>
-              </View>
+        <View style={ui.card}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flex: 1, paddingRight: 12 }}>
+              <Text style={[ui.body, { fontWeight: '600' }]}>Biometric lock</Text>
+              <Text style={ui.label}>
+                {lockAvailable
+                  ? 'Require Face ID or fingerprint to open OpenPrivy. Transfers always ask for confirmation.'
+                  : 'Set up Face ID or fingerprint in your device settings to use this.'}
+              </Text>
             </View>
+            <Switch
+              value={lockOn}
+              onValueChange={toggleLock}
+              disabled={!lockAvailable || busy}
+              trackColor={{ false: colors.border, true: colors.primary }}
+              accessibilityLabel="Biometric lock"
+            />
           </View>
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Security</Text>
-          <View style={styles.sectionContent}>
-            <View style={styles.settingItem}>
-              <View style={styles.settingLeft}>
-                <Text style={styles.settingLabel}>Biometric Login</Text>
-                <Text style={styles.settingDescription}>Face ID / Fingerprint</Text>
-              </View>
-              <Switch
-                value={biometricEnabled}
-                onValueChange={setBiometricEnabled}
-                trackColor={{ false: '#d1d5db', true: '#7c3aed' }}
-                thumbColor={biometricEnabled ? '#7c3aed' : '#f3f4f6'}
-              />
-            </View>
-
-            <View style={styles.divider} />
-
-            <TouchableOpacity style={styles.settingItem}>
-              <View>
-                <Text style={styles.settingLabel}>Change Password</Text>
-                <Text style={styles.settingDescription}>Update your password</Text>
-              </View>
-              <Text style={styles.settingArrow}>›</Text>
-            </TouchableOpacity>
-
-            <View style={styles.divider} />
-
-            <TouchableOpacity style={styles.settingItem}>
-              <View>
-                <Text style={styles.settingLabel}>Security Questions</Text>
-                <Text style={styles.settingDescription}>Set up recovery questions</Text>
-              </View>
-              <Text style={styles.settingArrow}>›</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Preferences</Text>
-          <View style={styles.sectionContent}>
-            <View style={styles.settingItem}>
-              <View style={styles.settingLeft}>
-                <Text style={styles.settingLabel}>Push Notifications</Text>
-                <Text style={styles.settingDescription}>Transaction alerts</Text>
-              </View>
-              <Switch
-                value={notificationsEnabled}
-                onValueChange={setNotificationsEnabled}
-                trackColor={{ false: '#d1d5db', true: '#7c3aed' }}
-                thumbColor={notificationsEnabled ? '#7c3aed' : '#f3f4f6'}
-              />
-            </View>
-
-            <View style={styles.divider} />
-
-            <TouchableOpacity style={styles.settingItem}>
-              <View>
-                <Text style={styles.settingLabel}>Default Currency</Text>
-                <Text style={styles.settingValue}>USD</Text>
-              </View>
-              <Text style={styles.settingArrow}>›</Text>
-            </TouchableOpacity>
-
-            <View style={styles.divider} />
-
-            <TouchableOpacity style={styles.settingItem}>
-              <View>
-                <Text style={styles.settingLabel}>Network Preference</Text>
-                <Text style={styles.settingValue}>Ethereum Sepolia</Text>
-              </View>
-              <Text style={styles.settingArrow}>›</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Support</Text>
-          <View style={styles.sectionContent}>
-            <TouchableOpacity style={styles.settingItem}>
-              <View>
-                <Text style={styles.settingLabel}>About OpenPrivy</Text>
-                <Text style={styles.settingDescription}>Version 1.0.0</Text>
-              </View>
-              <Text style={styles.settingArrow}>›</Text>
-            </TouchableOpacity>
-
-            <View style={styles.divider} />
-
-            <TouchableOpacity style={styles.settingItem}>
-              <View>
-                <Text style={styles.settingLabel}>Help & FAQ</Text>
-              </View>
-              <Text style={styles.settingArrow}>›</Text>
-            </TouchableOpacity>
-
-            <View style={styles.divider} />
-
-            <TouchableOpacity style={styles.settingItem}>
-              <View>
-                <Text style={styles.settingLabel}>Privacy Policy</Text>
-              </View>
-              <Text style={styles.settingArrow}>›</Text>
-            </TouchableOpacity>
-
-            <View style={styles.divider} />
-
-            <TouchableOpacity style={styles.settingItem}>
-              <View>
-                <Text style={styles.settingLabel}>Terms of Service</Text>
-              </View>
-              <Text style={styles.settingArrow}>›</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-            <Text style={styles.logoutButtonText}>Sign Out</Text>
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          style={ui.secondaryButton}
+          onPress={() =>
+            Alert.alert('Sign out', 'You will need to sign in again to use your wallet.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Sign out', style: 'destructive', onPress: () => signOut() },
+            ])
+          }
+          accessibilityRole="button"
+        >
+          <Text style={[ui.secondaryText, { color: colors.danger }]}>Sign out</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f9fafb',
-  },
-  header: {
-    padding: 20,
-    backgroundColor: '#7c3aed',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  section: {
-    marginTop: 24,
-    marginHorizontal: 16,
-  },
-  sectionTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#6b7280',
-    textTransform: 'uppercase',
-    marginBottom: 8,
-    letterSpacing: 0.5,
-  },
-  sectionContent: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  settingItem: {
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  settingLeft: {
-    flex: 1,
-  },
-  settingLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1f2937',
-    marginBottom: 4,
-  },
-  settingValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#7c3aed',
-  },
-  settingDescription: {
-    fontSize: 12,
-    color: '#9ca3af',
-  },
-  settingArrow: {
-    fontSize: 20,
-    color: '#d1d5db',
-    marginLeft: 16,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#f3f4f6',
-    marginHorizontal: 16,
-  },
-  logoutButton: {
-    marginTop: 24,
-    marginHorizontal: 16,
-    marginBottom: 40,
-    paddingVertical: 14,
-    backgroundColor: '#fee2e2',
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  logoutButtonText: {
-    color: '#dc2626',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-});
