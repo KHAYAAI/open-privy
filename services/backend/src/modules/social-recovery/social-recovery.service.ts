@@ -27,6 +27,7 @@ export class SocialRecoveryService {
     contactEmail: string,
     contactName: string,
   ): Promise<RecoveryContact> {
+    requireUserId(userId);
     const existing = await this.recoveryContactRepository.findOne({
       where: { userId, contactEmail },
     });
@@ -57,6 +58,7 @@ export class SocialRecoveryService {
   }
 
   async verifyRecoveryContact(userId: string, token: string): Promise<RecoveryContact> {
+    requireUserId(userId);
     const contact = await this.recoveryContactRepository.findOne({
       where: { userId, verificationToken: token },
     });
@@ -80,10 +82,12 @@ export class SocialRecoveryService {
   }
 
   async getRecoveryContacts(userId: string): Promise<RecoveryContact[]> {
+    requireUserId(userId);
     return this.recoveryContactRepository.find({ where: { userId } });
   }
 
   async removeRecoveryContact(userId: string, contactId: string): Promise<void> {
+    requireUserId(userId);
     const contact = await this.recoveryContactRepository.findOne({
       where: { id: contactId, userId },
     });
@@ -97,6 +101,7 @@ export class SocialRecoveryService {
   }
 
   async initiateRecovery(userId: string, contactIds: string[]): Promise<void> {
+    requireUserId(userId);
     if (!Array.isArray(contactIds) || contactIds.length === 0) {
       throw new BadRequestException('At least one guardian must be selected');
     }
@@ -146,6 +151,7 @@ export class SocialRecoveryService {
   }
 
   async approveRecovery(userId: string, recoveryCode: string): Promise<RecoveryGuardian> {
+    requireUserId(userId);
     const guardian = await this.recoveryGuardianRepository.findOne({
       where: { userId, recoveryCode },
     });
@@ -181,6 +187,7 @@ export class SocialRecoveryService {
     approvedGuardians: number;
     requiredApprovals: number;
   }> {
+    requireUserId(userId);
     const status = await this.getRecoveryStatus(userId);
 
     if (status.approvedGuardians < this.requiredApprovals) {
@@ -204,6 +211,7 @@ export class SocialRecoveryService {
 
   /** Guardians that have NOT yet approved a pending recovery. */
   async getPendingApprovals(userId: string): Promise<RecoveryGuardian[]> {
+    requireUserId(userId);
     return this.recoveryGuardianRepository.find({
       where: { userId, hasApproved: false },
     });
@@ -216,6 +224,7 @@ export class SocialRecoveryService {
     recoveryInitiated: boolean;
     canComplete: boolean;
   }> {
+    requireUserId(userId);
     const guardians = await this.recoveryGuardianRepository.find({
       where: { userId },
     });
@@ -229,5 +238,12 @@ export class SocialRecoveryService {
       recoveryInitiated: guardians.length > 0,
       canComplete: approvedCount >= this.requiredApprovals,
     };
+  }
+}
+
+/** TypeORM drops `undefined` from a where clause, so a missing id would match everyone. */
+function requireUserId(userId: string): void {
+  if (!userId || typeof userId !== 'string') {
+    throw new Error('social recovery called without an authenticated user id');
   }
 }

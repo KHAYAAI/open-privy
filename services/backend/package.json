@@ -23,7 +23,8 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "clean": "rm -rf dist",
     "drill:rotation": "bash scripts/key-rotation-drill.sh",
-    "rotate:master-key": "node dist/scripts/rotate-master-key.js"
+    "rotate:master-key": "node dist/scripts/rotate-master-key.js",
+    "drill:authz": "bash scripts/authz-drill.sh"
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.556.0",

@@ -1,7 +1,8 @@
-import { Controller, Post, Get, Body, Param, UseGuards, Req, Query } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, UseGuards, Req, Query, ParseUUIDPipe } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { WalletService } from './wallet.service';
 import { CreateWalletDto } from './dto/create-wallet.dto';
+import { SetRecoveryEmailDto } from './dto/set-recovery-email.dto';
 
 @Controller('wallet')
 @UseGuards(JwtAuthGuard)
@@ -55,17 +56,18 @@ export class WalletController {
   }
 
   @Get(':walletId/balance')
-  async getBalance(@Param('walletId') walletId: string) {
-    const balance = await this.walletService.getBalance(walletId);
+  async getBalance(@Req() req: any, @Param('walletId', new ParseUUIDPipe()) walletId: string) {
+    const balance = await this.walletService.getBalance(walletId, req.user.userId);
     return { balance, unit: 'ETH' };
   }
 
   @Post(':walletId/recovery-email')
   async setRecoveryEmail(
-    @Param('walletId') walletId: string,
-    @Body() body: { recoveryEmail: string },
+    @Req() req: any,
+    @Param('walletId', new ParseUUIDPipe()) walletId: string,
+    @Body() body: SetRecoveryEmailDto,
   ) {
-    await this.walletService.setRecoveryEmail(walletId, body.recoveryEmail);
+    await this.walletService.setRecoveryEmail(walletId, req.user.userId, body.recoveryEmail);
     return { message: 'Recovery email set successfully' };
   }
 }

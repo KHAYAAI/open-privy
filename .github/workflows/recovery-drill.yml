@@ -60,3 +60,12 @@ jobs:
           DRILL_DB_PASSWORD: dev
         run: npm run drill:rotation
         working-directory: services/backend
+
+      # Two-user authorization checks over real HTTP (wallet ownership,
+      # recovery-contact isolation, CSRF on the cookie session).
+      - name: Run the authorization drill
+        env:
+          DRILL_DB_USER: app
+          DRILL_DB_PASSWORD: dev
+        run: npm run drill:authz
+        working-directory: services/backend

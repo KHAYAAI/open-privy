@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
@@ -17,6 +17,7 @@ import { HealthController } from './common/health.controller';
 import { EncryptionModule } from './common/encryption/encryption.module';
 import { typeOrmConfig } from './config/typeorm.config';
 import { jwtConfig } from './config/jwt.config';
+import { CsrfMiddleware } from './common/middleware/csrf.middleware';
 
 @Module({
   imports: [
@@ -40,4 +41,9 @@ import { jwtConfig } from './config/jwt.config';
   ],
   controllers: [HealthController],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    // Runs after main.ts's cookieParser (global app.use middleware runs first).
+    consumer.apply(CsrfMiddleware).forRoutes('*');
+  }
+}

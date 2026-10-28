@@ -77,4 +77,19 @@ describe('AuthService.loginWithWorkOs', () => {
     expect(jwt.sign).toHaveBeenCalledWith({ sub: 'uuid-existing', email: profile.email });
     expect(res.user.id).toBe('uuid-existing');
   });
+
+  it('refuses to link an existing account when the provider has NOT verified the email (takeover guard)', async () => {
+    const existing = { id: 'uuid-victim', email: 'alice@openprivy.io', workosUserId: null, emailVerified: true };
+    const { svc, jwt, saved } = makeService(existing);
+    await expect(svc.loginWithWorkOs({ ...profile, emailVerified: false })).rejects.toThrow('Verify your email');
+    expect(jwt.sign).not.toHaveBeenCalled();
+    expect(saved).toHaveLength(0);
+  });
+
+  it('refuses to re-link an email already bound to a different WorkOS identity', async () => {
+    const existing = { id: 'uuid-victim', email: 'alice@openprivy.io', workosUserId: 'user_OTHER', emailVerified: true };
+    const { svc, jwt } = makeService(existing);
+    await expect(svc.loginWithWorkOs(profile)).rejects.toThrow('different sign-in identity');
+    expect(jwt.sign).not.toHaveBeenCalled();
+  });
 });

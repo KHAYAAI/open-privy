@@ -139,12 +139,24 @@ export class AuthService {
     });
 
     if (!user) {
-      // Link an existing account with the same email, if any.
-      user = await this.usersRepository.findOne({
+      const byEmail = await this.usersRepository.findOne({
         where: { email: profile.email },
       });
-      if (user) {
-        user.workosUserId = profile.workosUserId;
+      if (byEmail) {
+        // Linking by email hands this login the existing account (and its
+        // custodial wallets), so it is only safe when the identity provider
+        // has verified the address. Otherwise anyone could register the
+        // victim's email unverified and take over the account.
+        if (!profile.emailVerified) {
+          throw new UnauthorizedException(
+            'Verify your email address with your sign-in provider before signing in to an existing account',
+          );
+        }
+        if (byEmail.workosUserId && byEmail.workosUserId !== profile.workosUserId) {
+          throw new UnauthorizedException('This email is already linked to a different sign-in identity');
+        }
+        byEmail.workosUserId = profile.workosUserId;
+        user = byEmail;
       }
     }
 

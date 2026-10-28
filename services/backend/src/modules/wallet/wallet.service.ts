@@ -177,8 +177,8 @@ export class WalletService {
     return this.walletRepository.find({ where: { userId, isActive: true } });
   }
 
-  async getBalance(walletId: string): Promise<string> {
-    const wallet = await this.getWalletById(walletId);
+  async getBalance(walletId: string, userId: string): Promise<string> {
+    const wallet = await this.getOwnedWallet(walletId, userId);
 
     try {
       let balance: string;
@@ -209,8 +209,8 @@ export class WalletService {
     }
   }
 
-  async setRecoveryEmail(walletId: string, recoveryEmail: string): Promise<Wallet> {
-    const wallet = await this.getWalletById(walletId);
+  async setRecoveryEmail(walletId: string, userId: string, recoveryEmail: string): Promise<Wallet> {
+    const wallet = await this.getOwnedWallet(walletId, userId);
     wallet.recoveryEmail = recoveryEmail;
     return this.walletRepository.save(wallet);
   }
@@ -225,6 +225,16 @@ export class WalletService {
    *
    * The plaintext key must never be logged, persisted, or returned to a client.
    */
+  /** Loads a wallet only if it belongs to userId; otherwise 403. */
+  async getOwnedWallet(walletId: string, userId: string): Promise<Wallet> {
+    if (!userId) throw new ForbiddenException('Wallet does not belong to this user');
+    const wallet = await this.getWalletById(walletId);
+    if (wallet.userId !== userId) {
+      throw new ForbiddenException('Wallet does not belong to this user');
+    }
+    return wallet;
+  }
+
   async getDecryptedPrivateKey(walletId: string, userId: string): Promise<string> {
     const wallet = await this.getWalletById(walletId);
 
