@@ -10,8 +10,13 @@ real money out until the launch gates in `PRODUCTION_STATUS.md` are closed.
 **Time:** about one afternoon, mostly waiting for AWS.
 **Cost:** roughly **US$300–400 a month** while staging runs (Kubernetes cluster
 ~$73, two servers, a database in two zones, Redis, one NAT gateway). These are
-estimates; Phase 0 sets a budget alarm. Phase 12 shows how to delete
+estimates; Phase 0 sets a budget alarm. Phase 14 shows how to delete
 everything so the charges stop.
+
+**What you end up with:** the backend API on AWS (Phases 0–10), optionally
+public over HTTPS with the web app (Phases 11 and 11B), then the launch-gate
+checks (Phase 12), the mobile app (Phase 13), and how to turn it all off
+(Phase 14).
 
 Every command below is typed into a terminal (Terminal on Mac, PowerShell or
 WSL on Windows). Lines starting with `#` are comments; you don't type those.
@@ -423,11 +428,144 @@ it with your own (for staging, e.g. `api-staging.<yourdomain>`).
    `kubectl rollout restart deployment/backend -n openprivy`.
 
 **Check:** `curl https://<your api hostname>/health` returns ok from any
-computer. Then do one real WorkOS login in a browser at
-`https://<your api hostname>/auth/workos/authorize`. That's the last untested
-part of sign-in.
+computer. The real sign-in test happens in Phase 11B, through the web app.
 
-## Phase 12: Turning it off (so you stop paying)
+## Phase 11B (optional): The web app (≈30 min)
+
+The web app runs on **AWS Amplify Hosting**, which builds it straight from
+GitHub. One rule matters: the web app and the API must be on **the same
+parent domain** (for example `app-staging.example.com` and
+`api-staging.example.com`). The login cookie is only sent between sites that
+share a parent domain, so Amplify's default `*.amplifyapp.com` address will
+show the sign-in page but never stay signed in.
+
+1. Console → search **Amplify** → **Create new app** → **GitHub** → authorize
+   → repository `open-privy`, branch `claude/privy-alternative-production-0qmmsn`.
+2. Tick **My app is a monorepo** and enter `apps/web` as the app root.
+   Amplify detects Next.js and picks up `amplify.yml` from the repository.
+3. **Environment variables**: add `NEXT_PUBLIC_API_URL` =
+   `https://<your api hostname>`. Then **Save and deploy** (about 5 minutes).
+4. **Custom domain**: the app → **Hosting** → **Custom domains** → add your
+   domain and the subdomain `app-staging`. Follow the DNS records it shows
+   (automatic if your domain is in Route 53). Wait for **Available**.
+5. Tell the backend about the web app (replace both addresses):
+
+   ```bash
+   kubectl set env deployment/backend -n openprivy \
+     CORS_ORIGINS=https://app-staging.<yourdomain> \
+     WORKOS_POST_LOGIN_REDIRECT=https://app-staging.<yourdomain>/dashboard
+   ```
+
+   This restarts the server pods automatically.
+
+**Check:** open `https://app-staging.<yourdomain>`, click **Get started**,
+then **Continue**. Sign in through WorkOS (any Google account or email).
+You should land on **Your wallet**. Click **Create wallet**: an address
+appears. That single login is the last untested piece of sign-in.
+
+If you land back on the sign-in page after logging in, the two addresses are
+not on the same parent domain, or `CORS_ORIGINS` does not exactly match the
+web address (including `https://` and no trailing slash).
+
+## Phase 12: Launch-gate checks on staging
+
+These close the remaining engineering gates in `PRODUCTION_STATUS.md`. Do
+them in any order, and send me each result.
+
+### 12a. Database failover (10 min)
+
+Simulates the database server dying. AWS switches to the standby copy in
+the other zone.
+
+```bash
+DB_ID=$(aws rds describe-db-instances \
+  --query "DBInstances[?contains(DBInstanceIdentifier,'$CLUSTER') || contains(Endpoint.Address,'$CLUSTER')].DBInstanceIdentifier" \
+  --output text)
+date; aws rds reboot-db-instance --db-instance-identifier $DB_ID --force-failover
+# in a second terminal, until it settles:
+while true; do date +%T; curl -s -o /dev/null -w '%{http_code}\n' https://<your api hostname>/health; sleep 5; done
+```
+
+**Check:** `/health` returns 200 again within about 2 minutes, and your
+wallet still shows on the web app. Send me the start time and the time it
+came back.
+
+### 12b. Point-in-time restore (30 min, mostly waiting)
+
+Proves you can rewind the database to any minute in the last 30 days. It
+restores into a **new, separate** database and leaves the live one alone.
+
+```bash
+SUBNET_GROUP=$(aws rds describe-db-instances --db-instance-identifier $DB_ID \
+  --query "DBInstances[0].DBSubnetGroup.DBSubnetGroupName" --output text)
+SG=$(aws rds describe-db-instances --db-instance-identifier $DB_ID \
+  --query "DBInstances[0].VpcSecurityGroups[0].VpcSecurityGroupId" --output text)
+aws rds restore-db-instance-to-point-in-time \
+  --source-db-instance-identifier $DB_ID \
+  --target-db-instance-identifier $CLUSTER-pitr-test \
+  --use-latest-restorable-time \
+  --db-subnet-group-name $SUBNET_GROUP --vpc-security-group-ids $SG \
+  --db-instance-class db.t3.small --no-multi-az
+aws rds wait db-instance-available --db-instance-identifier $CLUSTER-pitr-test
+aws rds describe-db-instances --db-instance-identifier $CLUSTER-pitr-test \
+  --query "DBInstances[0].[DBInstanceStatus,Endpoint.Address]" --output text
+```
+
+**Check:** status `available`. Send me that output; I'll walk you through
+pointing one test pod at it to confirm a wallet decrypts. Then delete it so
+it stops costing money:
+
+```bash
+aws rds delete-db-instance --db-instance-identifier $CLUSTER-pitr-test --skip-final-snapshot
+```
+
+### 12c. Load test (20 min)
+
+Install **k6** (search "install k6" on grafana.com), then:
+
+```bash
+k6 run -e BASE_URL=https://<your api hostname> services/backend/test/load/api-load.k6.js
+```
+
+The rate limiter will start returning 429s, because every request comes
+from your one computer. That is expected. Send me the summary k6 prints at
+the end; I'll size the database, Redis and autoscaling from it.
+
+### 12d. Gasless transaction on Sepolia (together)
+
+This needs a Pimlico API key (Phase 9) and a little Sepolia test ETH from a
+public faucet in a fresh test wallet. Tell me when you have both and we'll
+deploy the contracts and send the first sponsored transaction together. You
+won't need to share the wallet's private key: you'll paste it into one
+command on your own computer.
+
+## Phase 13 (optional): Try the mobile app
+
+The mobile app signs in through an `openprivy://` link, which the Expo Go
+app cannot open, so you install a real build of it instead:
+
+1. Create a free account at expo.dev. On your computer:
+   ```bash
+   cd apps/mobile
+   npm install --legacy-peer-deps
+   npx eas-cli login
+   ```
+2. Open `apps/mobile/eas.json` and replace `https://api-staging.example.com`
+   with your API address from Phase 11.
+3. Build it in Expo's cloud (about 15 minutes):
+   ```bash
+   npx eas-cli build --profile preview --platform android
+   ```
+   It prints a link: open it on an Android phone to install. For iPhone use
+   `--platform ios`; Apple requires a paid developer account ($99/year) to
+   install test builds.
+4. Nothing changes in WorkOS: the phone signs in through the same backend
+   callback, which hands the app a one-time code.
+
+**Check:** open the app, tap **Continue**, sign in, then **Create wallet**
+(or see the one you made on the web, since it's the same account).
+
+## Phase 14: Turning it off (so you stop paying)
 
 Delete in this order. The cluster and database are most of the cost.
 
@@ -436,6 +574,7 @@ you turn it off on purpose. That's a safety feature.
 
 ```bash
 kubectl delete -f deploy-staging/ingress.yaml        # if you did Phase 11 (removes the load balancer)
+# If you did Phase 11B: Amplify console -> your app -> App settings -> General -> Delete app
 
 # Turn off deletion protection on the database
 DB_ID=$(aws rds describe-db-instances \
@@ -460,17 +599,7 @@ anywhere.
 
 ---
 
-## After staging is up: tell me and I'll take the next steps
-
-These were blocked only because there was no staging environment:
-
-1. **Staging load test**, including wallet creation, to size the database,
-   Redis and autoscaling against real numbers.
-2. **Disaster-recovery drills**: restore the database to a point in time and
-   force a Multi-AZ failover, then confirm wallets still decrypt
-   (`docs/DR_RUNBOOK.md`).
-3. **Gasless (ERC-4337) on Sepolia**, now that there's an environment with
-   internet access to blockchain RPC.
+## After staging is up: what to send me
 
 What to send me: the outputs of `kubectl get pods -n openprivy` and the
 `/health` check. **Never paste the master key, database password, JWT secret

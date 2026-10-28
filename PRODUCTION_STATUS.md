@@ -19,7 +19,7 @@ PostgreSQL 16, and Redis). Claims are labelled ✅ verified, 🟡 partial, or
 |---|---|---|
 | Compiles | ✅ | `npm run build` clean (was 435 TS errors before) |
 | Lint | ✅ | `npm run lint` 0 errors |
-| Unit/correctness/security tests | ✅ | 85 backend tests (10 suites) + 12 contract tests, all passing |
+| Unit/correctness/security tests | ✅ | 99 backend tests (11 suites), 12 contract tests, 8 web tests, 9 mobile tests, all passing |
 | Boots in production mode | ✅ | `NODE_ENV=production` against RDS-shaped Postgres |
 | Custodial wallet create → encrypt at rest | ✅ | HTTP e2e; key stored `iv:tag:ciphertext`, not plaintext |
 | Custodial send (decrypt→sign→broadcast) | ✅ (code) / 🟡 (chain) | crypto round-trip tested; live send needs funded key |
@@ -36,7 +36,12 @@ PostgreSQL 16, and Redis). Claims are labelled ✅ verified, 🟡 partial, or
 | Encryption master key from Secrets Manager | 🟡 | code path wired (IRSA + ARN); needs a real AWS account to exercise |
 | ERC-4337 / gasless transactions | ✅ (local chain) / 🟡 (public testnet) | Contracts rebuilt on the official `@account-abstraction/contracts` 0.7.0 (old ones targeted v0.6 and could never have validated). 12 contract tests against the **real EntryPoint v0.7**; plus an end-to-end test where the backend's `UserOpService` builds and signs a sponsored op that the EntryPoint executes on a local chain (account deploys, transfer lands, paymaster pays gas, second op on nonce 1). CI: `account-abstraction.yml`. Fixed on the way: sponsorship was applied after signing (invalidated every sponsored op), nonce read from the wrong contract, bundler RPC in the wrong format, and **gasless sends skipped sanctions screening**. Still to do: one run on Sepolia against Pimlico (needs network access). |
 | Master-key rotation | ✅ | Zero-downtime: servers hold current + previous keys; `rotate-master-key.js` (dry run by default, `--apply` to write) verifies every wallet derives its own address before writing, is resumable and idempotent. Full rehearsal `npm run drill:rotation` in CI on every push: dry run writes nothing, live rotation while serving, old key retired, every wallet still signs, old key fails, a poisoned row is refused. Procedure: `docs/DR_RUNBOOK.md` Scenario D. Not yet run against a real Secrets Manager secret. |
-| Supabase-backed auth end-to-end | ⚪ | superseded by WorkOS; Supabase now lazy/optional |
+| Supabase-backed auth end-to-end | ⚪ | superseded by WorkOS; removed from both apps |
+| Cross-user authorization | ✅ | Two-user drill over real HTTP in CI (`npm run drill:authz`, 12 checks). Fixed: any user could list every user's recovery contacts with their verification tokens and delete them (wrong user field + TypeORM dropping `undefined` from queries); read others' wallet balances; set others' wallet recovery email. WorkOS login no longer links an existing account through an unverified email (account-takeover path). |
+| CSRF on the browser session | ✅ | Cookie-authenticated writes require `X-CSRF-Token` (blocked cross-origin by CORS); covered by the drill |
+| Social recovery (guardians) | ❌ disabled | Off unless `ENABLE_SOCIAL_RECOVERY=true`. The current design lets the account owner verify and approve their own guardians, needs a logged-in session (which a locked-out user lacks), and "complete" restores nothing. Needs a redesign before it is turned on. |
+| Web app | ✅ | WorkOS sign-in with the httpOnly cookie (no token visible to scripts), working send flow with checksum/amount validation and a review step, strict CSP and security headers, patched Next.js 14.2. Verified in Chromium against the real backend: 17/17 checks. CI: `web.yml`. |
+| Mobile app | 🟡 | WorkOS sign-in via PKCE one-time code, token only in Keychain/Keystore with an OS-enforced biometric lock, send flow with biometric confirmation. Type-checks, 9 unit tests, and bundles for iOS and Android (CI: `mobile.yml`). **Not yet run on a device**; icons are placeholders. |
 
 ## Infrastructure (AWS)
 
@@ -90,7 +95,10 @@ The backend is a **real, running, custodial embedded-wallet API** with
 **optional HSM-backed signing path**, and **gasless ERC-4337 transactions
 proven against the real EntryPoint v0.7**. All of it is proven by running it,
 not asserted, on top of production-shaped AWS infrastructure that
-lints/validates clean. It is **not yet launch-certified**: an external audit,
+lints/validates clean. The web and mobile apps now use the same
+WorkOS sign-in and a working send flow, and a two-user authorization drill
+runs in CI. It is **not yet launch-certified**: an external audit,
 licensing, a staging deployment (with its load test, AWS failover drills and
-one public-testnet gasless send), and web/mobile hardening remain. This is
+one public-testnet gasless send), a device test of the mobile app, and a
+redesign of social recovery (currently disabled) remain. This is
 "deployable to staging for hardening", not "flip it live to the public".

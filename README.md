@@ -302,7 +302,7 @@ What's explicitly **not** done yet — see [Launch readiness](#launch-readiness)
 
 ```bash
 cd services/backend
-npm run test               # unit + correctness + security (85 passing, 10 suites)
+npm run test               # unit + correctness + security (99 passing, 11 suites)
 npm run test:security      # encryption, key rotation, auth, sanctions, HSM signing tests
 npm run test:correctness   # UserOp construction, sponsorship order, AA screening, custody round-trip
 npm run test:e2e           # requires a running DB
@@ -315,6 +315,11 @@ present at the standard install path, and skip cleanly otherwise.
 Drills (real Postgres + the real server; both run in CI on every push):
 - `npm run drill:recovery`: kill the server, restart, prove wallets still sign
 - `npm run drill:rotation`: full master-key rotation rehearsal (`docs/DR_RUNBOOK.md`, Scenario D)
+- `npm run drill:authz`: two users over real HTTP; neither can touch the other's data; CSRF rule
+
+Apps: `cd apps/web && npx jest && npx next build`; `cd apps/mobile && npx jest && npx tsc --noEmit`.
+
+Deploying a staging environment: **`docs/AWS_BEGINNER_GUIDE.md`** (step by step, written for a first-time AWS user).
 
 Contracts and gasless transactions (`services/contracts`):
 ```bash
