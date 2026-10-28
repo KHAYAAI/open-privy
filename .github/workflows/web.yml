@@ -1,0 +1,28 @@
+name: Web App
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ['apps/web/**', '.github/workflows/web.yml']
+  pull_request:
+    branches: [main, develop]
+    paths: ['apps/web/**', '.github/workflows/web.yml']
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --legacy-peer-deps
+      - run: npx tsc --noEmit
+      - run: npx next lint
+      - run: npx jest
+      - run: npx next build
+        env:
+          NEXT_PUBLIC_API_URL: https://api.example.invalid
