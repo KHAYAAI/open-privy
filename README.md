@@ -6,8 +6,9 @@ their behalf. Multi-chain (Ethereum, Polygon, Solana), gas-sponsored via
 ERC-4337 account abstraction.
 
 **Version:** 0.1.0
-**Status:** 🟡 Pre-launch — builds, boots, and passes its test suite; **not yet
-cleared for real user funds**. See [Launch readiness](#launch-readiness) below
+**Status:** 🟡 Pre-launch. Backend, contracts, web and mobile apps build and
+pass 128 tests, and four automated drills run in CI; **not yet cleared for
+real user funds**. See [Launch readiness](#launch-readiness) below
 and `PRODUCTION_STATUS.md` for the full, evidence-backed ledger.
 
 This README describes what the code does. It does not claim things that
@@ -32,7 +33,8 @@ ALB — TLS termination (ACM)
         ▼
 EKS — NestJS backend, 3–10 pods (HPA)
    modules: auth · wallet · blockchain · transactions
-            · account-abstraction · defi · social-recovery · monitoring
+            · account-abstraction · compliance · defi · monitoring
+            · social-recovery (disabled pending redesign)
         │
         ├──► RDS PostgreSQL 16 (Multi-AZ, schema via migrations)
         ├──► ElastiCache Redis (global rate limiting)
@@ -57,7 +59,7 @@ never persists and is never returned over the API.
 | Backend | NestJS + TypeORM |
 | Database | PostgreSQL 16 (RDS Multi-AZ) |
 | Cache / rate limiting | Redis (ElastiCache) |
-| Auth | WorkOS AuthKit (SSO, email, MFA) — Supabase supported as an optional legacy path |
+| Auth | WorkOS AuthKit (SSO, social, email, MFA): httpOnly cookie on web, PKCE one-time code on mobile |
 | Blockchain | ethers.js + Alchemy (EVM), @solana/web3.js |
 | Account abstraction | ERC-4337 (EntryPoint v0.7) + Pimlico bundler/paymaster |
 | Secrets | AWS Secrets Manager, read via pod IRSA role |
@@ -78,8 +80,8 @@ git clone https://github.com/khayaai/open-privy.git
 cd open-privy
 
 cp .env.example .env
-# fill in: ENCRYPTION_MASTER_KEY, JWT_SECRET, DATABASE_URL, and either
-# WORKOS_API_KEY/WORKOS_CLIENT_ID or SUPABASE_URL/SUPABASE_KEY (see below)
+# fill in: ENCRYPTION_MASTER_KEY, JWT_SECRET, DATABASE_URL,
+# WORKOS_API_KEY and WORKOS_CLIENT_ID (see below)
 
 docker-compose up -d          # Postgres + Redis
 
@@ -92,8 +94,14 @@ npm run dev                   # http://localhost:3001
 
 ```bash
 cd apps/web
-npm install
-npm run dev                   # http://localhost:3000
+npm install --legacy-peer-deps
+npm run dev                   # http://localhost:3000 (signs in through WorkOS via the backend)
+```
+
+```bash
+cd apps/mobile
+npm install --legacy-peer-deps
+npx expo start                # sign-in needs a dev/preview build (openprivy:// scheme), not Expo Go
 ```
 
 Verify: `curl http://localhost:3001/health` → `{"status":"ok",...}`
@@ -108,13 +116,12 @@ JWT_SECRET=$(openssl rand -base64 48)
 # Database
 DATABASE_URL=postgresql://app:dev-only@localhost:5432/openprivy
 
-# Auth — pick one
+# Auth (WorkOS AuthKit: SSO, social, email, MFA)
 WORKOS_API_KEY=sk_test_...
 WORKOS_CLIENT_ID=client_...
 WORKOS_REDIRECT_URI=http://localhost:3001/auth/workos/callback
-# — or —
-SUPABASE_URL=https://xxxx.supabase.co
-SUPABASE_KEY=eyJhbGc...
+WORKOS_POST_LOGIN_REDIRECT=http://localhost:3000/dashboard
+CORS_ORIGINS=http://localhost:3000   # the web app's origin, exactly
 
 # Blockchain RPC
 ETHEREUM_RPC_SEPOLIA=https://sepolia.infura.io/v3/YOUR_KEY
@@ -165,13 +172,17 @@ openprivy/
 
 ### Auth
 ```
-POST   /auth/signup                 # email/password (Supabase path)
-POST   /auth/login
-GET    /auth/workos/authorize       # returns the AuthKit hosted-login URL
-GET    /auth/workos/callback        # OAuth callback; sets the session cookie
+GET    /auth/workos/authorize        # web: returns the AuthKit hosted-login URL
+GET    /auth/workos/callback         # OAuth callback; web gets an httpOnly cookie, mobile a one-time code
+POST   /auth/workos/mobile/start     # mobile: PKCE challenge in, AuthKit URL out
+POST   /auth/workos/mobile/exchange  # mobile: one-time code + PKCE verifier -> session token
 GET    /auth/me
 POST   /auth/logout
+POST   /auth/signup, /auth/login     # legacy email/password; the apps no longer use these
 ```
+
+Cookie-authenticated writes must send an `X-CSRF-Token` header (any value);
+other origins cannot add it past CORS. Bearer-token clients are unaffected.
 
 ### Wallet
 ```
@@ -213,15 +224,10 @@ GET    /blockchain/polygon/balance/:address
 GET    /blockchain/supported-chains
 ```
 
-### Social recovery
-```
-POST   /recovery/contacts                # add a guardian contact
-POST   /recovery/contacts/verify
-POST   /recovery/initiate                # requires ≥2 verified guardians (M-of-N)
-POST   /recovery/approve
-POST   /recovery/complete
-GET    /recovery/status
-```
+### Social recovery (disabled)
+Off unless `ENABLE_SOCIAL_RECOVERY=true`; the routes return 404 otherwise. The
+current guardian design lets an account owner approve their own guardians and
+does not restore access, so it needs a redesign before it is turned on.
 
 ### DeFi
 ```
@@ -253,8 +259,9 @@ links a WorkOS identity to this account), `username`, `avatarUrl`,
 **wallets** — `id` (uuid PK), `userId` (FK), `address` (unique), `chain`
 (`ethereum`/`solana`/`polygon`), `publicKey`, `encryptedPrivateKey`
 (`iv:authTag:ciphertext`, AES-256-GCM — null for HSM-mode wallets),
-`signingMode` (`software`/`hsm`), `hsmKeyLabel` (null unless HSM-mode),
-`recoveryEmail`, `isActive`
+`encryptionKeyId` (non-secret id of the master key that encrypted it, used by
+rotation), `signingMode` (`software`/`hsm`), `hsmKeyLabel` (null unless
+HSM-mode), `recoveryEmail`, `isActive`
 
 **transactions** — `id` (uuid PK), `userId`/`walletId` (FK), `chain`, `txHash`,
 `fromAddress`, `toAddress`, `amount`, `status`, `metadata` (jsonb)
@@ -288,6 +295,18 @@ What's implemented and verified:
   generated non-extractable on a PKCS#11 token and never exists as plaintext
   anywhere, verified against a real token (SoftHSM2 locally; CloudHSM/Luna/
   YubiHSM in production use the same code path)
+- **Zero-downtime master-key rotation**, rehearsed end to end in CI
+- **Cross-user authorization drill in CI**: two users over real HTTP; neither
+  can read or change the other's wallets or recovery data
+- **WorkOS account linking requires a verified email** (closes an
+  account-takeover path); **CSRF protection** on the browser session
+- **Gasless transactions screened for sanctions** too, including ERC-20
+  recipients; unreadable call data is refused
+- **Web app**: session in an httpOnly cookie (no token visible to scripts),
+  strict Content-Security-Policy and security headers, patched Next.js
+- **Mobile app**: PKCE one-time-code sign-in (no token in URLs), token only in
+  the iOS Keychain / Android Keystore, OS-enforced biometric lock, biometric
+  confirmation before sends, Android backups disabled
 
 What's explicitly **not** done yet — see [Launch readiness](#launch-readiness):
 - No independent security audit
@@ -296,6 +315,9 @@ What's explicitly **not** done yet — see [Launch readiness](#launch-readiness)
 - Master-key rotation is built and rehearsed in CI, but not yet run against a
   real Secrets Manager secret
 - HSM signing not yet exercised against physical hardware, only SoftHSM2
+- Mobile app not yet run on a device (it type-checks, is tested, and bundles
+  for iOS and Android); icons are placeholders
+- Social recovery disabled pending a redesign
 - No money-transmitter / VASP licensing review for the custodial model
 
 ## Testing
@@ -338,33 +360,16 @@ docker-compose up
 ```
 
 ### AWS (staging/production)
-Full ordered runbook: **`docs/AWS_PRODUCTION_DEPLOY.md`**. Summary:
 
-```bash
-# 1. Network + cluster
-aws cloudformation deploy --template-file aws/cloudformation-vpc-eks.yaml \
-  --stack-name openprivy-vpc-eks --capabilities CAPABILITY_IAM
+- **First time on AWS? Start here:** `docs/AWS_BEGINNER_GUIDE.md`. A
+  phase-by-phase walkthrough from an empty account to a running staging
+  backend, the web app on Amplify, the mobile build, and the launch-gate
+  checks, with a check after every phase and a teardown at the end.
+- Condensed runbook for experienced operators: `docs/AWS_PRODUCTION_DEPLOY.md`.
 
-# 2. Databases (RDS + Redis + Secrets + S3), using outputs from step 1
-aws cloudformation deploy --template-file aws/cloudformation-databases.yaml \
-  --stack-name openprivy-databases --capabilities CAPABILITY_IAM \
-  --parameter-overrides VpcId=<id> PrivateSubnet1=<id> PrivateSubnet2=<id>
-
-# 3. Encryption master key
-aws secretsmanager create-secret --name openprivy-prod/encryption/master-key \
-  --secret-string "$(openssl rand -base64 32)"
-
-# 4. Build & push the image, then apply k8s manifests
-kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/migrate-job.yaml && kubectl wait --for=condition=complete job/db-migrate -n openprivy
-kubectl apply -f k8s/backend.yaml
-kubectl apply -f k8s/ingress.yaml
-```
-
-Both CloudFormation templates pass `cfn-lint` with zero errors. The Dockerfile
-and CI/CD workflows are written and internally consistent but have not been
-executed end-to-end in this development environment (no Docker daemon / AWS
-credentials available here) — that's the next real-infrastructure step.
+The CloudFormation templates pass `cfn-lint`, and the web and mobile builds
+are verified. The backend Docker image and the CD pipeline have not yet been
+run end to end; the first staging deploy does that.
 
 ### Disaster recovery
 `docs/DR_RUNBOOK.md` — RPO ≤5 min / RTO ≤60 min targets, failure scenarios, and
@@ -385,18 +390,22 @@ reproduction steps in `test/load/RESULTS.md`.
 
 ## Launch readiness
 
-Six gates stand between this repository and real user funds. None close by
-writing more code alone — the full ledger with evidence is in
-**`PRODUCTION_STATUS.md`**.
+Six gates stand between this repository and real user funds. The full ledger
+with evidence is in **`PRODUCTION_STATUS.md`**.
 
-| Gate | Status |
-|---|---|
-| External security audit (custody, AA, auth) | Not started |
-| Live ERC-4337 transaction confirmed on-chain | Proven against the real EntryPoint v0.7 on a local chain (in CI); one sponsored send on Sepolia via Pimlico remains |
-| Load test + DR drill on real AWS infrastructure | Local baseline + backup/restore verified; RDS PITR and Multi-AZ failover need a real account |
-| Master-key rotation tooling + rehearsed drill | Done: zero-downtime tool + full rehearsal in CI; one real rotation on staging remains |
-| Docker image + CI/CD executed end-to-end | Rewritten, unexecuted in this environment |
-| Money-transmitter / VASP licensing review | Not started — custodial key storage may require it depending on jurisdiction |
+| # | Gate | Status | What closes it |
+|---|---|---|---|
+| 1 | External security audit | Open | Send `docs/SECURITY_AUDIT_BRIEF.md` to audit firms; closes when the final report has no unresolved critical/high findings |
+| 2 | Live ERC-4337 transaction | Partial | Proven against the real EntryPoint v0.7 on a local chain (CI). Closes with one sponsored send on Sepolia via Pimlico, from staging (guide Phase 12d) |
+| 3 | Staging load test | Partial | Local baseline captured. Closes with a k6 run against staging that meets the targets (guide Phase 12c) |
+| 4 | Master-key rotation | **Closed** | Zero-downtime tool + full rehearsal in CI. Optional: one real rotation on staging |
+| 5 | Disaster recovery on AWS | Partial | Backup/restore and kill-restart drills verified. Closes with a Multi-AZ failover and a point-in-time restore on staging within RPO ≤5 min / RTO ≤60 min (guide Phases 12a–b) |
+| 6 | Money-transmitter / VASP licensing | Open | Send `docs/LICENSING_SCOPING_MEMO.md` to counsel per launch jurisdiction; closes with a written opinion and licences, or a licensed-partner structure |
+
+**Road to launch**
+1. **Now, in parallel:** send the audit brief and the licensing memo. Both run on their own clock.
+2. **Staging:** follow `docs/AWS_BEGINNER_GUIDE.md`, then run Phase 12 (load test, failover, restore, Sepolia send). This closes gates 2, 3 and 5.
+3. **Then:** test the mobile app on devices, redesign social recovery, fix audit findings, and open to real traffic.
 
 ## Compliance & licensing
 
@@ -447,7 +456,8 @@ contributions.
 ## Further reading
 
 - `PRODUCTION_STATUS.md` — verified / partial / blocked, with evidence for each
-- `docs/AWS_PRODUCTION_DEPLOY.md` — ordered AWS deployment runbook
+- `docs/AWS_BEGINNER_GUIDE.md` — step-by-step staging deployment for a first-time AWS user
+- `docs/AWS_PRODUCTION_DEPLOY.md` — condensed AWS deployment runbook
 - `docs/DR_RUNBOOK.md` — disaster recovery scenarios and drill checklist
 - `docs/SECURITY_AUDIT_BRIEF.md` — ready-to-send engagement brief for an independent audit
 - `docs/LICENSING_SCOPING_MEMO.md` — ready-to-send scoping memo for counsel on custodial licensing
