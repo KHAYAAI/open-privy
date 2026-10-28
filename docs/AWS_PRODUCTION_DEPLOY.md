@@ -5,6 +5,11 @@ what the code and IaC in this repo actually do. Where a step needs something
 this repo cannot provide (an AWS account, a domain, an audit), that is called
 out explicitly rather than assumed done.
 
+> **New to AWS?** Follow `docs/AWS_BEGINNER_GUIDE.md` instead. It is the same
+> procedure, step by step, for a staging environment. `aws/deploy-aws.sh` is
+> legacy: it creates differently-named secrets than the manifests read, so
+> don't use it.
+
 Architecture: **ALB → EKS (backend pods) → RDS PostgreSQL (Multi-AZ) + ElastiCache Redis**,
 with the encryption master key in **AWS Secrets Manager** (read by pods via IRSA).
 
@@ -132,7 +137,9 @@ recovery_guardians, migrations) with the correct FKs.
 ## 6. Roll out the backend
 
 ```bash
-kubectl apply -f k8s/backend.yaml      # ConfigMap, Secret, Deployment, SA, Service, HPA
+kubectl apply -f k8s/backend.yaml      # ConfigMap, Deployment, SA, Service, HPA
+# backend-secrets is created separately (see k8s/backend-secrets.example.yaml)
+# so re-applying this file can never overwrite real secrets.
 kubectl apply -f k8s/ingress.yaml      # ALB + TLS (ACM cert ARN required)
 kubectl rollout status deployment/backend -n openprivy --timeout=5m
 ```

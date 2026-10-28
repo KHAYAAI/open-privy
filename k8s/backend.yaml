@@ -16,33 +16,6 @@ data:
   ENCRYPTION_MASTER_KEY_SECRET_ARN: "arn:aws:secretsmanager:us-east-1:REPLACE_ACCOUNT_ID:secret:openprivy-prod/encryption/master-key"
 
 ---
-# NOTE: These are the injection points, not the source of truth. In production
-# they should be synced from AWS Secrets Manager by the External Secrets Operator
-# or the Secrets Store CSI driver (see docs/AWS_PRODUCTION_DEPLOY.md), never
-# committed with real values. The placeholders below let a cluster start in a
-# non-production sandbox.
-apiVersion: v1
-kind: Secret
-metadata:
-  name: backend-secrets
-  namespace: openprivy
-type: Opaque
-stringData:
-  DATABASE_URL: postgresql://openprivy:changeme@postgres:5432/openprivy
-  REDIS_URL: redis://redis:6379
-  JWT_SECRET: change-in-production-min-32-chars-long
-  ETHEREUM_RPC_SEPOLIA: ""
-  ETHEREUM_RPC_MAINNET: ""
-  ETHEREUM_RPC_POLYGON: ""
-  SOLANA_RPC_MAINNET: ""
-  SOLANA_RPC_DEVNET: ""
-  PIMLICO_API_KEY: ""
-  PIMLICO_ENDPOINT: ""
-  ALCHEMY_API_KEY: ""
-  SUPABASE_URL: ""
-  SUPABASE_KEY: ""
-
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:

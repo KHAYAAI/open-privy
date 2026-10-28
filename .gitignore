@@ -63,3 +63,6 @@ secrets/
 
 # Build artifacts
 tsconfig.tsbuildinfo
+
+# Filled-in manifests from docs/AWS_BEGINNER_GUIDE.md (contain real ARNs)
+deploy-staging/
