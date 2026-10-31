@@ -1,86 +1,61 @@
-import { useEffect, useState } from 'react';
-import { api } from '@/lib/api';
-import { ethers } from 'ethers';
+import { useCallback, useEffect, useState } from 'react';
+import { api, errorMessage } from '@/lib/api';
 
-interface Wallet {
+export interface Wallet {
   id: string;
   address: string;
   chain: string;
-  createdAt: string;
+  createdAt?: string;
 }
 
-export const useWallet = () => {
+export const useWallet = (enabled = true) => {
   const [wallet, setWallet] = useState<Wallet | null>(null);
-  const [balance, setBalance] = useState<string>('0');
-  const [loading, setLoading] = useState(false);
+  const [balance, setBalance] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const createWallet = async (chain: string = 'ethereum') => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const { data } = await api.post('/wallet/create', { chain });
-      setWallet(data);
-      await fetchBalance(data.id);
-      return data;
-    } catch (err: any) {
-      const message = err.response?.data?.message || err.message;
-      setError(message);
-      throw err;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchWallet = async (chain?: string) => {
-    setLoading(true);
-    try {
-      const params = chain ? { chain } : {};
-      const { data } = await api.get('/wallet/get', { params });
-      if (data.address) {
-        setWallet(data);
-        await fetchBalance(data.id);
-      }
-    } catch (err: any) {
-      const message = err.response?.data?.message || err.message;
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchBalance = async (walletId: string) => {
+  const fetchBalance = useCallback(async (walletId: string) => {
     try {
       const { data } = await api.get(`/wallet/${walletId}/balance`);
-      setBalance(data.balance);
-    } catch (err) {
-      console.error('Failed to fetch balance:', err);
+      setBalance(String(data.balance));
+    } catch {
+      setBalance(null);
     }
-  };
+  }, []);
 
-  const listWallets = async () => {
+  const fetchWallet = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      const { data } = await api.get('/wallet/list');
-      return data;
+      const { data } = await api.get('/wallet/get', { params: { chain: 'ethereum' } });
+      if (data?.address) {
+        setWallet(data);
+        await fetchBalance(data.id);
+      } else {
+        setWallet(null);
+      }
     } catch (err: any) {
-      console.error('Failed to list wallets:', err);
-      return [];
+      if (err?.response?.status === 404) setWallet(null);
+      else setError(errorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [fetchBalance]);
+
+  const createWallet = async () => {
+    setError(null);
+    try {
+      const { data } = await api.post('/wallet/create', { chain: 'ethereum' });
+      setWallet(data);
+      await fetchBalance(data.id);
+    } catch (err) {
+      setError(errorMessage(err, 'Could not create your wallet.'));
     }
   };
 
   useEffect(() => {
-    fetchWallet();
-  }, []);
+    if (enabled) fetchWallet();
+  }, [enabled, fetchWallet]);
 
-  return {
-    wallet,
-    balance,
-    loading,
-    error,
-    createWallet,
-    fetchWallet,
-    fetchBalance,
-    listWallets,
-  };
+  return { wallet, balance, loading, error, createWallet, refresh: fetchWallet };
 };

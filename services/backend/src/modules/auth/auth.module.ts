@@ -5,6 +5,8 @@ import { JwtModule } from '@nestjs/jwt';
 
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
+import { WorkOsService } from './workos.service';
+import { OneTimeStore } from './one-time-store';
 import { User } from './entities/user.entity';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { jwtConfig } from '../../config/jwt.config';
@@ -15,7 +17,7 @@ import { jwtConfig } from '../../config/jwt.config';
     PassportModule,
     JwtModule.register(jwtConfig),
   ],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, WorkOsService, JwtStrategy, OneTimeStore],
   controllers: [AuthController],
   exports: [AuthService],
 })

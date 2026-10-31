@@ -1,225 +1,98 @@
-import React, { useEffect, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  SafeAreaView,
-  ScrollView,
-  TouchableOpacity,
-  ActivityIndicator,
-  RefreshControl,
-} from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { ActivityIndicator, RefreshControl, SafeAreaView, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import * as Clipboard from 'expo-clipboard';
 import { useAuthStore } from '../store/authStore';
-import { api } from '../lib/api';
-
-interface Wallet {
-  id: string;
-  address: string;
-  chain: string;
-  createdAt: string;
-}
+import { useWallet } from '../hooks/useWallet';
+import { colors, ui } from '../theme';
 
 export default function WalletScreen({ navigation }: any) {
-  const [wallet, setWallet] = useState<Wallet | null>(null);
-  const [balance, setBalance] = useState<string>('0');
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const { user } = useAuthStore();
+  const { wallet, balance, loading, error, refresh, createWallet } = useWallet();
+  const [refreshing, setRefreshing] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  const fetchWallet = async () => {
-    try {
-      setLoading(true);
-      const { data } = await api.get('/wallet/get');
-      setWallet(data);
-
-      if (data.id) {
-        const balanceRes = await api.get(`/wallet/${data.id}/balance`);
-        setBalance(balanceRes.data.balance);
-      }
-    } catch (error) {
-      console.error('Failed to fetch wallet:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await fetchWallet();
-    setRefreshing(false);
-  };
-
-  useEffect(() => {
-    fetchWallet();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      refresh();
+    }, [refresh]),
+  );
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color="#7c3aed" />
-        </View>
-      </SafeAreaView>
+      <View style={ui.centered}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={ui.screen}>
       <ScrollView
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        contentContainerStyle={ui.pad}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={async () => {
+              setRefreshing(true);
+              await refresh();
+              setRefreshing(false);
+            }}
+          />
+        }
       >
-        <View style={styles.header}>
-          <Text style={styles.greeting}>Hello, {user?.email}</Text>
-          <Text style={styles.subtitle}>Your Web3 Wallet</Text>
-        </View>
-
+        <Text style={ui.label}>{user?.email}</Text>
+        {error && <Text style={ui.error}>{error}</Text>}
         {wallet ? (
-          <>
-            <View style={styles.balanceCard}>
-              <Text style={styles.balanceLabel}>Total Balance</Text>
-              <Text style={styles.balanceAmount}>{balance} ETH</Text>
-              <Text style={styles.address}>{wallet.address.substring(0, 10)}...</Text>
-            </View>
-
-            <View style={styles.actions}>
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={() => navigation.navigate('SendTab')}
-              >
-                <Text style={styles.actionIcon}>📤</Text>
-                <Text style={styles.actionText}>Send</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.actionButton}>
-                <Text style={styles.actionIcon}>📥</Text>
-                <Text style={styles.actionText}>Receive</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.actionButton}>
-                <Text style={styles.actionIcon}>💱</Text>
-                <Text style={styles.actionText}>Swap</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.infoCard}>
-              <Text style={styles.infoTitle}>Network</Text>
-              <Text style={styles.infoValue}>{wallet.chain === 'ethereum' ? 'Ethereum (Sepolia)' : wallet.chain}</Text>
-            </View>
-
-            <View style={styles.infoCard}>
-              <Text style={styles.infoTitle}>Security Status</Text>
-              <Text style={styles.statusGood}>✅ Secure</Text>
-            </View>
-          </>
+          <View style={ui.card}>
+            <Text style={ui.label}>Balance (Ethereum)</Text>
+            {balance === null ? (
+              <Text style={[ui.body, { color: colors.muted, marginBottom: 16 }]}>
+                Your balance cannot be loaded right now. Pull down to refresh.
+              </Text>
+            ) : (
+              <Text style={{ fontSize: 32, fontWeight: 'bold', color: colors.primary, marginBottom: 16 }}>{balance} ETH</Text>
+            )}
+            <Text style={ui.label}>Your address</Text>
+            <Text style={[ui.mono, { marginBottom: 8 }]} selectable>
+              {wallet.address}
+            </Text>
+            <TouchableOpacity
+              onPress={async () => {
+                await Clipboard.setStringAsync(wallet.address);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              }}
+              accessibilityRole="button"
+            >
+              <Text style={{ color: colors.primary, marginBottom: 16 }}>{copied ? 'Copied' : 'Copy address'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={ui.button} onPress={() => navigation.navigate('SendTab')} accessibilityRole="button">
+              <Text style={ui.buttonText}>Send</Text>
+            </TouchableOpacity>
+          </View>
         ) : (
-          <View style={styles.centered}>
-            <Text style={styles.error}>No wallet found</Text>
+          <View style={ui.card}>
+            <Text style={[ui.body, { marginBottom: 16 }]}>You do not have a wallet yet. Create one to receive and send ETH.</Text>
+            <TouchableOpacity
+              style={[ui.button, creating && ui.disabled]}
+              disabled={creating}
+              onPress={async () => {
+                setCreating(true);
+                await createWallet();
+                setCreating(false);
+              }}
+              accessibilityRole="button"
+            >
+              <Text style={ui.buttonText}>{creating ? 'Creating…' : 'Create wallet'}</Text>
+            </TouchableOpacity>
           </View>
         )}
+        <Text style={[ui.label, { marginTop: 8 }]}>
+          Your private key is encrypted and held by OpenPrivy, so there is no seed phrase to write down.
+        </Text>
       </ScrollView>
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f9fafb',
-  },
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  header: {
-    padding: 20,
-    backgroundColor: '#7c3aed',
-  },
-  greeting: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#f3f4f6',
-    marginTop: 4,
-  },
-  balanceCard: {
-    margin: 16,
-    padding: 20,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  balanceLabel: {
-    fontSize: 14,
-    color: '#6b7280',
-  },
-  balanceAmount: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#7c3aed',
-    marginVertical: 8,
-  },
-  address: {
-    fontSize: 12,
-    color: '#9ca3af',
-    fontFamily: 'monospace',
-  },
-  actions: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    gap: 12,
-  },
-  actionButton: {
-    flex: 1,
-    padding: 16,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  actionIcon: {
-    fontSize: 24,
-    marginBottom: 8,
-  },
-  actionText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#1f2937',
-  },
-  infoCard: {
-    margin: 16,
-    padding: 16,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-  },
-  infoTitle: {
-    fontSize: 14,
-    color: '#6b7280',
-    marginBottom: 4,
-  },
-  infoValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1f2937',
-  },
-  statusGood: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#059669',
-  },
-  error: {
-    fontSize: 16,
-    color: '#dc2626',
-  },
-});

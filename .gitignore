@@ -63,3 +63,11 @@ secrets/
 
 # Build artifacts
 tsconfig.tsbuildinfo
+
+# Filled-in manifests from docs/AWS_BEGINNER_GUIDE.md (contain real ARNs)
+deploy-staging/
+
+# Hardhat build outputs
+services/contracts/artifacts/
+services/contracts/cache/
+services/contracts/typechain-types/
