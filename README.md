@@ -54,9 +54,9 @@ never persists and is never returned over the API.
 
 | Layer | Technology |
 |---|---|
-| Web | Next.js + React |
-| Mobile | Expo (React Native) |
-| Backend | NestJS + TypeORM |
+| Web | Next.js 15 + React 18 |
+| Mobile | Expo SDK 58 (React Native 0.88, React 19) |
+| Backend | NestJS 11 (Express 5) + TypeORM |
 | Database | PostgreSQL 16 (RDS Multi-AZ) |
 | Cache / rate limiting | Redis (ElastiCache) |
 | Auth | WorkOS AuthKit (SSO, social, email, MFA): httpOnly cookie on web, PKCE one-time code on mobile |

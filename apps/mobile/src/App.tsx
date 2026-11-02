@@ -3,6 +3,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import * as WebBrowser from 'expo-web-browser';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuthStore } from './store/authStore';
 import { colors } from './theme';
 
@@ -36,17 +37,25 @@ export default function App() {
     initializeAuth().finally(() => setBooting(false));
   }, [initializeAuth]);
 
-  if (booting) return <SplashScreen />;
+  if (booting) {
+    return (
+      <SafeAreaProvider>
+        <SplashScreen />
+      </SafeAreaProvider>
+    );
+  }
 
   return (
-    <NavigationContainer>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {user ? (
-          <Stack.Screen name="Wallet" component={WalletTabs} />
-        ) : (
-          <Stack.Screen name="Login" component={LoginScreen} options={{ animation: 'none' }} />
-        )}
-      </Stack.Navigator>
-    </NavigationContainer>
+    <SafeAreaProvider>
+      <NavigationContainer>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          {user ? (
+            <Stack.Screen name="Wallet" component={WalletTabs} />
+          ) : (
+            <Stack.Screen name="Login" component={LoginScreen} options={{ animation: 'none' }} />
+          )}
+        </Stack.Navigator>
+      </NavigationContainer>
+    </SafeAreaProvider>
   );
 }

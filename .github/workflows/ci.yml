@@ -68,16 +68,13 @@ jobs:
       - name: Install dependencies (workspace lockfile)
         run: npm ci --legacy-peer-deps --ignore-scripts
 
-      # Blocking: the custody server and web app ship to production.
+      # Every shipped app blocks on high/critical advisories.
       - name: Audit backend (high/critical block)
         run: npm audit --omit=dev --audit-level=high --workspace services/backend
       - name: Audit web app (high/critical block)
         run: npm audit --omit=dev --audit-level=high --workspace apps/web
 
-      # Report-only until the Expo 49 -> current upgrade lands (tracked in
-      # PRODUCTION_STATUS.md). Remaining findings are in mobile build tooling.
-      - name: Audit mobile app (report only, pending Expo upgrade)
-        continue-on-error: true
+      - name: Audit mobile app (high/critical block)
         run: npm audit --omit=dev --audit-level=high --workspace apps/mobile
 
       - name: SAST scan

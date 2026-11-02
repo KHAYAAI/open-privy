@@ -30,7 +30,13 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-local-authentication"
+      "expo-local-authentication",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": "OpenPrivy uses Face ID to unlock the app and confirm transfers."
+        }
+      ]
     ],
     "scheme": "openprivy"
   }

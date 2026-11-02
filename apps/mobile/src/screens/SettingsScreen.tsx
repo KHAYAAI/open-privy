@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, SafeAreaView, ScrollView, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { useAuthStore } from '../store/authStore';
 import { isBiometricLockOn, setBiometricLock } from '../lib/secureSession';
