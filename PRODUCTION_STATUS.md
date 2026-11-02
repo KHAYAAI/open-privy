@@ -1,6 +1,6 @@
 # OpenPrivy — Production Status (source of truth)
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-11-02
 
 This document supersedes the earlier self-certified files
 (`PRODUCTION_READY_SUMMARY.md`, `AUDIT_REPORT_SIMULATION.md`,
@@ -38,6 +38,7 @@ PostgreSQL 16, and Redis). Claims are labelled ✅ verified, 🟡 partial, or
 | Master-key rotation | ✅ | Zero-downtime: servers hold current + previous keys; `rotate-master-key.js` (dry run by default, `--apply` to write) verifies every wallet derives its own address before writing, is resumable and idempotent. Full rehearsal `npm run drill:rotation` in CI on every push: dry run writes nothing, live rotation while serving, old key retired, every wallet still signs, old key fails, a poisoned row is refused. Procedure: `docs/DR_RUNBOOK.md` Scenario D. Not yet run against a real Secrets Manager secret. |
 | Supabase-backed auth end-to-end | ⚪ | superseded by WorkOS; removed from both apps |
 | Cross-user authorization | ✅ | Two-user drill over real HTTP in CI (`npm run drill:authz`, 12 checks). Fixed: any user could list every user's recovery contacts with their verification tokens and delete them (wrong user field + TypeORM dropping `undefined` from queries); read others' wallet balances; set others' wallet recovery email. WorkOS login no longer links an existing account through an unverified email (account-takeover path). |
+| Dependency security audit | 🟡 | Backend and web app: **0 high/critical** production advisories (NestJS 11.2.8 on Express 5, Next.js 15.5.28, patched `multer`/`lodash`/`postcss` via overrides); blocking in CI. Mobile: remaining high/critical findings are in Expo 49 / React Native 0.72 build tooling; audit is report-only until that upgrade lands. |
 | CSRF on the browser session | ✅ | Cookie-authenticated writes require `X-CSRF-Token` (blocked cross-origin by CORS); covered by the drill |
 | Social recovery (guardians) | ❌ disabled | Off unless `ENABLE_SOCIAL_RECOVERY=true`. The current design lets the account owner verify and approve their own guardians, needs a logged-in session (which a locked-out user lacks), and "complete" restores nothing. Needs a redesign before it is turned on. |
 | Web app | ✅ | WorkOS sign-in with the httpOnly cookie (no token visible to scripts), working send flow with checksum/amount validation and a review step, strict CSP and security headers, patched Next.js 14.2. Verified in Chromium against the real backend: 17/17 checks. CI: `web.yml`. |
