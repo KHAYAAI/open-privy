@@ -71,6 +71,17 @@ export default function Dashboard() {
       <p className="mt-6 text-sm text-gray-500">
         Your private key is encrypted and held by OpenPrivy, so there is no seed phrase to write down.
       </p>
+      <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm">
+        {wallet ? (
+          <Link href="/recovery/guardians" className="text-primary underline">
+            Set up recovery guardians
+          </Link>
+        ) : (
+          <Link href="/recovery/start" className="text-primary underline">
+            Lost access to an old account? Recover it here
+          </Link>
+        )}
+      </div>
     </Layout>
   );
 }

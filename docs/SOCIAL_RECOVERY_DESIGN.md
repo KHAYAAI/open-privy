@@ -1,6 +1,8 @@
 # Social recovery: redesign
 
-Status: proposed. The current implementation is disabled
+Status: **implemented** (backend, web; mobile screens pending). Decisions: 48-hour time lock, AWS SES for email. Proof: `npm run drill:social-recovery`.
+
+The previous implementation was disabled
 (`ENABLE_SOCIAL_RECOVERY`) because the account owner could verify and
 approve their own guardians, recovery required the very session a
 locked-out user has lost, and "completing" recovery restored nothing.

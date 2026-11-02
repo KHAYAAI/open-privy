@@ -224,10 +224,18 @@ GET    /blockchain/polygon/balance/:address
 GET    /blockchain/supported-chains
 ```
 
-### Social recovery (disabled)
-Off unless `ENABLE_SOCIAL_RECOVERY=true`; the routes return 404 otherwise. The
-current guardian design lets an account owner approve their own guardians and
-does not restore access, so it needs a redesign before it is turned on.
+### Social recovery
+Off unless `ENABLE_SOCIAL_RECOVERY=true` (needs email: SES + `MAIL_FROM`). Design: `docs/SOCIAL_RECOVERY_DESIGN.md`.
+```
+GET    /recovery/guardians                 # signed in: your guardians and whether recovery is ready
+POST   /recovery/guardians                 # signed in: invite a guardian (they confirm by email)
+DELETE /recovery/guardians/:id
+POST   /recovery/requests                  # signed in (new account): recover an old account's wallets
+GET    /recovery/requests/current          # signed in: progress of your request
+POST   /recovery/guardian-invites/lookup|confirm   # emailed link (token in body)
+POST   /recovery/approvals/lookup|decide           # emailed link (token in body)
+POST   /recovery/requests/cancel                    # emailed "this wasn't me" link
+```
 
 ### DeFi
 ```
@@ -317,7 +325,7 @@ What's explicitly **not** done yet — see [Launch readiness](#launch-readiness)
 - HSM signing not yet exercised against physical hardware, only SoftHSM2
 - Mobile app not yet run on a device (it type-checks, is tested, and bundles
   for iOS and Android); icons are placeholders
-- Social recovery disabled pending a redesign
+- Social recovery: web flow done; mobile screens not built yet
 - No money-transmitter / VASP licensing review for the custodial model
 
 ## Testing
@@ -337,7 +345,8 @@ present at the standard install path, and skip cleanly otherwise.
 Drills (real Postgres + the real server; both run in CI on every push):
 - `npm run drill:recovery`: kill the server, restart, prove wallets still sign
 - `npm run drill:rotation`: full master-key rotation rehearsal (`docs/DR_RUNBOOK.md`, Scenario D)
-- `npm run drill:authz`: two users over real HTTP; neither can touch the other's data; CSRF rule
+- `npm run drill:authz`: two users over real HTTP; neither can touch the other's data; CSRF rule; readable 429s
+- `npm run drill:social-recovery`: guardians, approvals, time lock, wallet hand-over, cancel/decline
 
 Apps: `cd apps/web && npx jest && npx next build`; `cd apps/mobile && npx jest && npx tsc --noEmit`.
 

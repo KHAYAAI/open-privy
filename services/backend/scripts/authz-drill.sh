@@ -127,4 +127,14 @@ pass "cookie-authenticated POST with X-CSRF-Token is accepted"
 [ "$(status GET /auth/me - '' -H "Cookie: op_session=${A}")" = "200" ] || { body; fail "cookie GET rejected"; }
 pass "cookie-authenticated GET works without the header"
 
+# --- a rate-limited response must still be readable by the browser -----------
+for _ in $(seq 1 400); do
+  HDRS=$(curl -s -D - -o /dev/null -H "Origin: http://localhost:3000" "$BASE/auth/me")
+  echo "$HDRS" | head -1 | grep -q " 429" && break
+done
+echo "$HDRS" | head -1 | grep -q " 429" || fail "never hit the rate limit"
+echo "$HDRS" | grep -qi "^access-control-allow-origin: http://localhost:3000" || { echo "$HDRS"; fail "429 response has no CORS header; browsers will hide it"; }
+echo "$HDRS" | grep -qi "^retry-after:" || fail "429 response has no Retry-After"
+pass "rate-limited (429) responses carry CORS headers and Retry-After"
+
 log "AUTHZ_DRILL_OK (${PASSES} checks)"

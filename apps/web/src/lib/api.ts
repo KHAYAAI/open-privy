@@ -36,6 +36,10 @@ export function errorMessage(err: unknown, fallback = 'Something went wrong. Ple
   if (!e?.response) {
     return e?.code === 'ECONNABORTED' ? 'The server took too long to respond. Please try again.' : 'Cannot reach the server. Check your connection.';
   }
+  if (e.response.status === 429) {
+    const wait = Number(e.response.headers?.['retry-after']);
+    return wait > 0 ? `Too many attempts. Please wait ${wait} seconds and try again.` : 'Too many attempts. Please wait a minute and try again.';
+  }
   const m = e.response.data?.message;
   if (Array.isArray(m)) return m.join('. ');
   if (typeof m === 'string' && m.length < 300) return m;

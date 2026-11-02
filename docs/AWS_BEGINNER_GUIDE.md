@@ -467,6 +467,44 @@ If you land back on the sign-in page after logging in, the two addresses are
 not on the same parent domain, or `CORS_ORIGINS` does not exactly match the
 web address (including `https://` and no trailing slash).
 
+## Phase 11C (optional): Email and account recovery (≈30 min, plus AWS review)
+
+Account recovery emails your users' guardians, so the server needs to send
+email through **Amazon SES**.
+
+1. **Verify your domain**: console → **Amazon SES** → **Identities** →
+   **Create identity** → Domain → your domain. Add the DNS records it shows
+   (automatic if the domain is in Route 53). Wait for **Verified**.
+2. **Leave the sandbox**: a new SES account can only email addresses you have
+   verified. SES → **Account dashboard** → **Request production access**.
+   Describe it as transactional email (guardian invitations and security
+   alerts for a wallet app). AWS usually answers within a day.
+3. **Let the server send**, using the same role as Phase 8:
+
+   ```bash
+   cat > /tmp/openprivy-ses-policy.json <<EOF
+   { "Version": "2012-10-17",
+     "Statement": [{ "Effect": "Allow", "Action": "ses:SendEmail", "Resource": "*" }] }
+   EOF
+   aws iam create-policy --policy-name openprivy-staging-ses-send \
+     --policy-document file:///tmp/openprivy-ses-policy.json
+   aws iam attach-role-policy --role-name openprivy-staging-backend-irsa \
+     --policy-arn arn:aws:iam::$ACCOUNT_ID:policy/openprivy-staging-ses-send
+   ```
+
+4. **Turn recovery on**:
+
+   ```bash
+   kubectl set env deployment/backend -n openprivy \
+     ENABLE_SOCIAL_RECOVERY=true \
+     MAIL_FROM="OpenPrivy <no-reply@<yourdomain>>" \
+     APP_URL=https://app-staging.<yourdomain>
+   ```
+
+**Check:** on the web app, open **Set up recovery guardians**, invite a
+guardian with an email address you can read, and confirm the invitation
+arrives and its link opens the "Become a recovery guardian" page.
+
 ## Phase 12: Launch-gate checks on staging
 
 These close the remaining engineering gates in `PRODUCTION_STATUS.md`. Do

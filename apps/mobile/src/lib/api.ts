@@ -33,6 +33,10 @@ api.interceptors.response.use(
 export function errorMessage(err: unknown, fallback = 'Something went wrong. Please try again.'): string {
   const e = err as AxiosError<{ message?: string | string[] }>;
   if (!e?.response) return 'Cannot reach OpenPrivy. Check your connection.';
+  if (e.response.status === 429) {
+    const wait = Number(e.response.headers?.['retry-after']);
+    return wait > 0 ? `Too many attempts. Please wait ${wait} seconds and try again.` : 'Too many attempts. Please wait a minute and try again.';
+  }
   const m = e.response.data?.message;
   if (Array.isArray(m)) return m.join('. ');
   if (typeof m === 'string' && m.length < 300) return m;
