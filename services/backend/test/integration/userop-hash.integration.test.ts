@@ -38,7 +38,9 @@ const maybe = RPC ? describe : describe.skip;
 
 maybe('UserOpService against a real EntryPoint v0.7', () => {
   jest.setTimeout(60_000);
-  const provider = new ethers.JsonRpcProvider(RPC);
+  // cacheTimeout -1: ethers otherwise reuses identical calls for 250 ms, so a
+  // balance read right after a transaction can return the pre-transaction value.
+  const provider = new ethers.JsonRpcProvider(RPC, undefined, { cacheTimeout: -1 });
   const entryPoint = new ethers.Contract(
     ENTRYPOINT,
     [

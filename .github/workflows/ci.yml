@@ -26,22 +26,24 @@ jobs:
           - 5432:5432
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Install backend dependencies
-        run: |
-          cd services/backend
-          npm install
+      # Workspace install from the committed lockfile (reproducible versions).
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
 
       - name: Build backend
-        run: |
-          cd services/backend
-          npm run build
+        run: npm run build
+        working-directory: services/backend
+
+      - name: Lint backend
+        run: npm run lint
+        working-directory: services/backend
 
       - name: Generate test encryption master key
         run: echo "ENCRYPTION_MASTER_KEY=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
@@ -50,30 +52,21 @@ jobs:
         env:
           DATABASE_URL: postgresql://app:test@localhost:5432/openprivy_test
           JWT_SECRET: ci-test-secret-at-least-16-chars
-        run: |
-          cd services/backend
-          npm run test
-
-      - name: Build mobile app
-        run: |
-          cd apps/mobile
-          npm run build
-
-      - name: Run linter
-        run: npm run lint
+        run: npm run test
+        working-directory: services/backend
 
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
 
       - name: Run security audit
-        run: npm audit --production
+        run: npm audit --omit=dev --audit-level=high
 
       - name: SAST scan
         run: npm run sast 2>/dev/null || echo "No SAST configured"

@@ -28,7 +28,9 @@ describe('PKCE', () => {
 });
 
 describe('session token', () => {
-  const sign = (exp: number) => require('jsonwebtoken').sign({ sub: 'u', exp }, 'k');
+  const b64url = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  // Signature is irrelevant here: the app only reads exp; the server verifies.
+  const sign = (exp: number) => `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: 'u', exp })}.sig`;
 
   it('reads exp and treats expired or nearly expired tokens as unusable', () => {
     const now = Date.now();

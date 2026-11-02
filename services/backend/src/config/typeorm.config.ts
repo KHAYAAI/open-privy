@@ -30,8 +30,10 @@ export const typeOrmConfig: TypeOrmModuleOptions = {
   // Staging/production get their schema from migrations (see the migrate job).
   synchronize: process.env.NODE_ENV === 'development',
   logging: process.env.NODE_ENV === 'development',
+  // Production defaults to SSL (RDS requires it); DATABASE_SSL=false opts out
+  // explicitly, e.g. for a local or CI Postgres without TLS.
   ssl:
-    isProduction || process.env.DATABASE_SSL === 'true'
+    process.env.DATABASE_SSL === 'true' || (isProduction && process.env.DATABASE_SSL !== 'false')
       ? { rejectUnauthorized: false }
       : false,
   migrations: [join(__dirname, '../migrations/*.{js,ts}')],

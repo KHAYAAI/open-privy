@@ -21,13 +21,8 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install contract dependencies
-        run: npm install --legacy-peer-deps
-        working-directory: services/contracts
-
-      - name: Install backend dependencies
-        run: npm install --legacy-peer-deps
-        working-directory: services/backend
+      - name: Install dependencies (workspace lockfile)
+        run: npm ci --legacy-peer-deps
 
       - name: Compile contracts
         run: npx hardhat compile
