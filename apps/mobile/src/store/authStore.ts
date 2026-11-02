@@ -1,9 +1,15 @@
 import { create } from 'zustand';
-import * as SecureStore from 'expo-secure-store';
-import { supabase } from '../lib/supabase';
-import { api } from '../lib/api';
+import * as Crypto from 'expo-crypto';
+import * as WebBrowser from 'expo-web-browser';
+import { api, setApiSession, errorMessage } from '../lib/api';
+import { base64ToBase64Url, verifierFromRandomBytes, codeFromRedirect } from '../lib/pkce';
+import { isTokenUsable } from '../lib/token';
+import { isTrustedAuthUrl } from '../lib/validation';
+import { clearSession, readToken, saveToken } from '../lib/secureSession';
 
-interface User {
+const APP_REDIRECT = 'openprivy://auth';
+
+export interface User {
   id: string;
   email: string;
   username?: string;
@@ -14,119 +20,78 @@ interface AuthStore {
   token: string | null;
   loading: boolean;
   error: string | null;
-
-  // Actions
-  signup: (email: string, password: string, username?: string) => Promise<void>;
-  login: (email: string, password: string) => Promise<void>;
-  logout: () => Promise<void>;
   initializeAuth: () => Promise<void>;
-  loginWithBiometric: () => Promise<void>;
+  signIn: () => Promise<void>;
+  signOut: () => Promise<void>;
 }
 
-export const useAuthStore = create<AuthStore>((set) => ({
-  user: null,
-  token: null,
-  loading: false,
-  error: null,
+export const useAuthStore = create<AuthStore>((set, get) => {
+  const adopt = async (token: string) => {
+    setApiSession(token, () => get().signOut());
+    const { data } = await api.get<User>('/auth/me');
+    set({ user: data, token, error: null });
+  };
 
-  signup: async (email, password, username) => {
-    set({ loading: true, error: null });
-    try {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: { username },
-        },
-      });
+  return {
+    user: null,
+    token: null,
+    loading: false,
+    error: null,
 
-      if (error) throw error;
-
-      // Also register with backend
-      await api.post('/auth/signup', { email, password, username });
-
-      set({ user: { id: data.user?.id || '', email, username } });
-    } catch (error: any) {
-      set({ error: error.message });
-      throw error;
-    } finally {
-      set({ loading: false });
-    }
-  },
-
-  login: async (email, password) => {
-    set({ loading: true, error: null });
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (error) throw error;
-
-      const token = data.session?.access_token;
-      if (token) {
-        await SecureStore.setItemAsync('auth_token', token);
-        await SecureStore.setItemAsync('user_email', email);
+    /** Restores a saved session (shows the biometric prompt if the lock is on). */
+    initializeAuth: async () => {
+      const token = await readToken();
+      if (!isTokenUsable(token)) {
+        if (token) await clearSession();
+        return;
       }
+      try {
+        await adopt(token!);
+      } catch {
+        await clearSession();
+        setApiSession(null);
+      }
+    },
 
-      set({
-        user: {
-          id: data.user?.id || '',
-          email: data.user?.email || email,
-        },
-        token,
-      });
-    } catch (error: any) {
-      set({ error: error.message });
-      throw error;
-    } finally {
-      set({ loading: false });
-    }
-  },
+    /** WorkOS AuthKit in the system browser, finished with a PKCE one-time code exchange. */
+    signIn: async () => {
+      set({ loading: true, error: null });
+      try {
+        const verifier = verifierFromRandomBytes(await Crypto.getRandomBytesAsync(128));
+        const challenge = base64ToBase64Url(
+          await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, verifier, {
+            encoding: Crypto.CryptoEncoding.BASE64,
+          }),
+        );
+        const { data } = await api.post<{ url: string }>('/auth/workos/mobile/start', { codeChallenge: challenge });
+        if (!isTrustedAuthUrl(data.url)) throw new Error('Sign-in is unavailable right now.');
 
-  logout: async () => {
-    await supabase.auth.signOut();
-    await SecureStore.deleteItemAsync('auth_token');
-    await SecureStore.deleteItemAsync('user_email');
-    set({ user: null, token: null });
-  },
+        const result = await WebBrowser.openAuthSessionAsync(data.url, APP_REDIRECT);
+        if (result.type !== 'success') return; // user closed the browser
+        const code = codeFromRedirect(result.url, APP_REDIRECT);
+        if (!code) throw new Error('Sign-in did not complete. Please try again.');
 
-  initializeAuth: async () => {
-    try {
-      const token = await SecureStore.getItemAsync('auth_token');
-      const email = await SecureStore.getItemAsync('user_email');
-
-      if (token && email) {
-        set({
-          token,
-          user: { id: '', email },
+        const exchange = await api.post<{ access_token: string }>('/auth/workos/mobile/exchange', {
+          code,
+          codeVerifier: verifier,
         });
+        await saveToken(exchange.data.access_token);
+        await adopt(exchange.data.access_token);
+      } catch (e: any) {
+        set({ error: e?.response ? 'Sign-in is unavailable right now. Please try again in a few minutes.' : e.message || errorMessage(e) });
+      } finally {
+        set({ loading: false });
       }
-    } catch (error) {
-      console.error('Failed to initialize auth:', error);
-    }
-  },
+    },
 
-  loginWithBiometric: async () => {
-    set({ loading: true, error: null });
-    try {
-      const email = await SecureStore.getItemAsync('user_email');
-      const token = await SecureStore.getItemAsync('auth_token');
-
-      if (!email || !token) {
-        throw new Error('No saved credentials found');
+    signOut: async () => {
+      const token = get().token;
+      setApiSession(null);
+      set({ user: null, token: null });
+      await clearSession();
+      if (token) {
+        api.post('/auth/logout', undefined, { headers: { Authorization: `Bearer ${token}` } }).catch(() => undefined);
       }
-
-      set({
-        user: { id: '', email },
-        token,
-      });
-    } catch (error: any) {
-      set({ error: error.message });
-      throw error;
-    } finally {
-      set({ loading: false });
-    }
-  },
-}));
+    },
+  };
+});

@@ -1,83 +1,80 @@
-import { Controller, Get, Post, Delete, Body, Query, Param, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { SocialRecoveryService } from './social-recovery.service';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { AuthUser, CurrentUser } from '../auth/decorators/current-user.decorator';
+import { SocialRecoveryEnabledGuard } from './social-recovery.enabled.guard';
+import { RecoveryService } from './recovery.service';
+import { AddGuardianDto, DecisionDto, StartRecoveryDto, TokenDto } from './dto/recovery.dto';
 
+/**
+ * Social recovery. Signed-in routes manage your guardians or recover onto
+ * your (new) account. Guardian and cancel routes are authenticated by the
+ * one-time token from the email, sent in the body (never the URL path) and
+ * only ever acted on by POST, so link scanners opening an email do nothing.
+ */
 @Controller('recovery')
-@UseGuards(JwtAuthGuard)
+@UseGuards(SocialRecoveryEnabledGuard)
 export class SocialRecoveryController {
-  constructor(private recoveryService: SocialRecoveryService) {}
+  constructor(private readonly recovery: RecoveryService) {}
 
-  @Post('contacts')
-  async addRecoveryContact(
-    @CurrentUser() user: any,
-    @Body() body: { contactEmail: string; contactName: string },
-  ) {
-    const contact = await this.recoveryService.addRecoveryContact(
-      user.id,
-      body.contactEmail,
-      body.contactName,
-    );
-    return { success: true, contact };
+  @Get('guardians')
+  @UseGuards(JwtAuthGuard)
+  listGuardians(@CurrentUser() user: AuthUser) {
+    return this.recovery.listGuardians(user.userId);
   }
 
-  @Get('contacts')
-  async getRecoveryContacts(@CurrentUser() user: any) {
-    const contacts = await this.recoveryService.getRecoveryContacts(user.id);
-    return contacts;
+  @Post('guardians')
+  @UseGuards(JwtAuthGuard)
+  addGuardian(@CurrentUser() user: AuthUser, @Body() body: AddGuardianDto) {
+    return this.recovery.addGuardian(user.userId, body.name, body.email);
   }
 
-  @Post('contacts/verify')
-  async verifyRecoveryContact(
-    @CurrentUser() user: any,
-    @Query('token') token: string,
-  ) {
-    const contact = await this.recoveryService.verifyRecoveryContact(
-      user.id,
-      token,
-    );
-    return { success: true, contact };
+  @Delete('guardians/:id')
+  @UseGuards(JwtAuthGuard)
+  async removeGuardian(@CurrentUser() user: AuthUser, @Param('id', new ParseUUIDPipe()) id: string) {
+    await this.recovery.removeGuardian(user.userId, id);
+    return { removed: true };
   }
 
-  @Delete('contacts/:contactId')
-  async removeRecoveryContact(
-    @CurrentUser() user: any,
-    @Param('contactId') contactId: string,
-  ) {
-    await this.recoveryService.removeRecoveryContact(user.id, contactId);
-    return { success: true };
+  @Post('guardian-invites/lookup')
+  @HttpCode(200)
+  describeInvite(@Body() body: TokenDto) {
+    return this.recovery.describeInvite(body.token);
   }
 
-  @Post('initiate')
-  async initiateRecovery(
-    @CurrentUser() user: any,
-    @Body() body: { contactIds: string[] },
-  ) {
-    await this.recoveryService.initiateRecovery(user.id, body.contactIds);
-    return { success: true, message: 'Recovery initiated' };
+  @Post('guardian-invites/confirm')
+  @HttpCode(200)
+  confirmInvite(@Body() body: TokenDto) {
+    return this.recovery.confirmInvite(body.token);
   }
 
-  @Post('approve')
-  async approveRecovery(
-    @CurrentUser() user: any,
-    @Query('code') recoveryCode: string,
-  ) {
-    const guardian = await this.recoveryService.approveRecovery(
-      user.id,
-      recoveryCode,
-    );
-    return { success: true, guardian };
+  @Post('requests')
+  @HttpCode(202)
+  @UseGuards(JwtAuthGuard)
+  start(@CurrentUser() user: AuthUser, @Body() body: StartRecoveryDto) {
+    return this.recovery.startRequest(user.userId, body.oldAccountEmail);
   }
 
-  @Get('status')
-  async getRecoveryStatus(@CurrentUser() user: any) {
-    const status = await this.recoveryService.getRecoveryStatus(user.id);
-    return status;
+  @Get('requests/current')
+  @UseGuards(JwtAuthGuard)
+  current(@CurrentUser() user: AuthUser) {
+    return this.recovery.currentRequest(user.userId);
   }
 
-  @Get('approvals')
-  async getPendingApprovals(@CurrentUser() user: any) {
-    const approvals = await this.recoveryService.getRecoveryApprovals(user.id);
-    return approvals;
+  @Post('requests/cancel')
+  @HttpCode(200)
+  cancel(@Body() body: TokenDto) {
+    return this.recovery.cancelByToken(body.token);
+  }
+
+  @Post('approvals/lookup')
+  @HttpCode(200)
+  describeApproval(@Body() body: TokenDto) {
+    return this.recovery.describeApproval(body.token);
+  }
+
+  @Post('approvals/decide')
+  @HttpCode(200)
+  decide(@Body() body: DecisionDto) {
+    return this.recovery.decide(body.token, body.decision);
   }
 }

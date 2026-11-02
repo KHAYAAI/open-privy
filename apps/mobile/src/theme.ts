@@ -1,0 +1,50 @@
+import { StyleSheet } from 'react-native';
+
+export const colors = {
+  primary: '#7c3aed',
+  bg: '#f9fafb',
+  card: '#ffffff',
+  text: '#111827',
+  muted: '#6b7280',
+  border: '#e5e7eb',
+  danger: '#b91c1c',
+  dangerBg: '#fef2f2',
+};
+
+export const ui = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: colors.bg },
+  pad: { padding: 16 },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  card: {
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  title: { fontSize: 24, fontWeight: 'bold', color: colors.text, marginBottom: 8 },
+  label: { fontSize: 14, color: colors.muted, marginBottom: 4 },
+  body: { fontSize: 15, color: colors.text, lineHeight: 22 },
+  mono: { fontFamily: 'Courier', fontSize: 13, color: colors.text },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    backgroundColor: colors.card,
+    color: colors.text,
+  },
+  button: { backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
+  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  secondaryButton: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
+  secondaryText: { color: colors.text, fontSize: 16 },
+  error: { color: colors.danger, backgroundColor: colors.dangerBg, padding: 12, borderRadius: 8, marginBottom: 12, fontSize: 14 },
+  fieldError: { color: colors.danger, fontSize: 13, marginTop: 4 },
+  disabled: { opacity: 0.6 },
+});

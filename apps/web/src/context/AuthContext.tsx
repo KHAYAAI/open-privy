@@ -1,64 +1,72 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { api } from '@/lib/api';
+import { isTrustedAuthUrl } from '@/lib/validation';
+
+export interface User {
+  id: string;
+  email: string;
+  username?: string;
+  emailVerified?: boolean;
+}
 
 interface AuthContextType {
-  user: any | null;
+  user: User | null;
   loading: boolean;
+  login: (organizationId?: string) => Promise<void>;
   logout: () => Promise<void>;
-  getToken: () => string | null;
+  refresh: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<any | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const { data, error } = await supabase.auth.getSession();
-        if (error) throw error;
-
-        if (data.session?.user) {
-          setUser(data.session.user);
-          localStorage.setItem('token', data.session.access_token);
-        }
-      } catch (error) {
-        console.error('Auth check failed:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    checkAuth();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user || null);
-      if (session?.access_token) {
-        localStorage.setItem('token', session.access_token);
-      } else {
-        localStorage.removeItem('token');
-      }
-    });
-
-    return () => subscription?.unsubscribe();
+  const refresh = useCallback(async () => {
+    try {
+      const { data } = await api.get<User>('/auth/me');
+      setUser(data);
+    } catch {
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const logout = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-    localStorage.removeItem('token');
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  /** Sends the browser to WorkOS AuthKit (sign in or sign up, SSO, social, MFA). */
+  const login = async (organizationId?: string) => {
+    let url: string;
+    try {
+      const { data } = await api.get<{ url: string }>('/auth/workos/authorize', {
+        params: organizationId ? { organization_id: organizationId } : undefined,
+      });
+      url = data.url;
+    } catch {
+      // Server details (e.g. missing configuration) are not for end users.
+      throw new Error('Sign-in is unavailable right now. Please try again in a few minutes.');
+    }
+    if (!isTrustedAuthUrl(url)) {
+      throw new Error('Sign-in is unavailable right now.');
+    }
+    window.location.assign(url);
   };
 
-  const getToken = () => localStorage.getItem('token');
+  const logout = async () => {
+    try {
+      await api.post('/auth/logout');
+    } finally {
+      setUser(null);
+      window.location.assign('/auth/login');
+    }
+  };
 
   return (
-    <AuthContext.Provider value={{ user, loading, logout, getToken }}>
-      {children}
-    </AuthContext.Provider>
+    <AuthContext.Provider value={{ user, loading, login, logout, refresh }}>{children}</AuthContext.Provider>
   );
 };
 

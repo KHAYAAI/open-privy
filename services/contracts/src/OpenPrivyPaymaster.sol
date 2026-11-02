@@ -1,144 +1,109 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import "./interfaces/IPaymaster.sol";
-import "./interfaces/IEntryPoint.sol";
+import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import "@account-abstraction/contracts/core/BasePaymaster.sol";
+import "@account-abstraction/contracts/core/UserOperationLib.sol";
+import "@account-abstraction/contracts/core/Helpers.sol";
 
 /**
  * @title OpenPrivyPaymaster
- * @notice Gas sponsorship contract enabling $0 transaction fees
- * @dev Sponsors gas costs for OpenPrivy users
+ * @notice EntryPoint v0.7 verifying paymaster: sponsors gas for allow-listed
+ *         accounts when the OpenPrivy backend has signed the specific UserOp.
+ * @dev paymasterAndData layout (v0.7):
+ *      [0:20]   paymaster address
+ *      [20:36]  paymasterVerificationGasLimit (uint128)
+ *      [36:52]  paymasterPostOpGasLimit (uint128)
+ *      [52:116] abi.encode(uint48 validUntil, uint48 validAfter)
+ *      [116:]   backend signature over getHash(userOp, validUntil, validAfter)
  */
-contract OpenPrivyPaymaster is IPaymaster, Ownable {
-  using ECDSA for bytes32;
+contract OpenPrivyPaymaster is BasePaymaster {
+  using UserOperationLib for PackedUserOperation;
 
-  IEntryPoint public immutable entryPoint;
+  uint256 private constant VALID_TIMESTAMP_OFFSET = PAYMASTER_DATA_OFFSET;
+  uint256 private constant SIGNATURE_OFFSET = VALID_TIMESTAMP_OFFSET + 64;
+
   address public paymasterSigner;
-
-  uint256 public constant VALID_TIMESTAMP_OFFSET = 21;
-  uint256 public constant SIGNATURE_OFFSET = 169;
-
   mapping(address => bool) public sponsoredAccounts;
   mapping(address => uint256) public gasSponsored;
 
-  event GasSponsored(address indexed account, address indexed sender, uint256 amount);
+  event GasSponsored(address indexed account, uint256 actualGasCost);
   event PaymasterSignerUpdated(address indexed newSigner);
   event AccountSponsorship(address indexed account, bool enabled);
 
-  constructor(IEntryPoint _entryPoint, address _signer) {
-    entryPoint = _entryPoint;
+  constructor(IEntryPoint _entryPoint, address _signer) BasePaymaster(_entryPoint) {
+    require(_signer != address(0), "invalid signer");
     paymasterSigner = _signer;
   }
 
-  /**
-   * @notice Update paymaster signer (for signature verification)
-   */
   function setPaymasterSigner(address _signer) external onlyOwner {
+    require(_signer != address(0), "invalid signer");
     paymasterSigner = _signer;
     emit PaymasterSignerUpdated(_signer);
   }
 
-  /**
-   * @notice Enable or disable sponsorship for an account
-   */
   function setSponsorshipStatus(address account, bool enabled) external onlyOwner {
     sponsoredAccounts[account] = enabled;
     emit AccountSponsorship(account, enabled);
   }
 
-  /**
-   * @notice Validate paymaster user operation
-   * @param userOp User operation
-   * @param userOpHash User operation hash
-   * @param maxCost Maximum gas cost
-   * @return context Context data for postOp
-   * @return validationData Validation result
-   */
-  function validatePaymasterUserOp(
-    IEntryPoint.UserOperation calldata userOp,
-    bytes32 userOpHash,
-    uint256 maxCost
-  ) external view returns (bytes memory context, uint256 validationData) {
-    // Check if account is sponsored
+  /// @notice Hash the backend signs. Excludes paymasterAndData's own signature
+  /// but binds the paymaster gas limits, chain and this contract.
+  function getHash(PackedUserOperation calldata userOp, uint48 validUntil, uint48 validAfter)
+    public
+    view
+    returns (bytes32)
+  {
+    return
+      keccak256(
+        abi.encode(
+          userOp.getSender(),
+          userOp.nonce,
+          keccak256(userOp.initCode),
+          keccak256(userOp.callData),
+          userOp.accountGasLimits,
+          uint256(bytes32(userOp.paymasterAndData[PAYMASTER_VALIDATION_GAS_OFFSET:PAYMASTER_DATA_OFFSET])),
+          userOp.preVerificationGas,
+          userOp.gasFees,
+          block.chainid,
+          address(this),
+          validUntil,
+          validAfter
+        )
+      );
+  }
+
+  function parsePaymasterAndData(bytes calldata paymasterAndData)
+    public
+    pure
+    returns (uint48 validUntil, uint48 validAfter, bytes calldata signature)
+  {
+    (validUntil, validAfter) = abi.decode(paymasterAndData[VALID_TIMESTAMP_OFFSET:SIGNATURE_OFFSET], (uint48, uint48));
+    signature = paymasterAndData[SIGNATURE_OFFSET:];
+  }
+
+  function _validatePaymasterUserOp(PackedUserOperation calldata userOp, bytes32, uint256)
+    internal
+    view
+    override
+    returns (bytes memory context, uint256 validationData)
+  {
+    (uint48 validUntil, uint48 validAfter, bytes calldata signature) = parsePaymasterAndData(userOp.paymasterAndData);
     if (!sponsoredAccounts[userOp.sender]) {
-      return ("", 1); // Not sponsored
+      return ("", _packValidationData(true, validUntil, validAfter));
     }
-
-    // Verify signature from paymaster signer
-    bytes calldata sig = userOp.paymasterAndData[20:];
-    bytes32 hash = keccak256(abi.encodePacked(userOpHash, maxCost));
-    address signer = hash.toEthSignedMessageHash().recover(sig);
-
-    if (signer != paymasterSigner) {
-      return ("", 1); // Invalid signature
+    bytes32 hash = MessageHashUtils.toEthSignedMessageHash(getHash(userOp, validUntil, validAfter));
+    (address recovered, ECDSA.RecoverError err, ) = ECDSA.tryRecover(hash, signature);
+    if (err != ECDSA.RecoverError.NoError || recovered != paymasterSigner) {
+      return ("", _packValidationData(true, validUntil, validAfter));
     }
-
-    // Return context for postOp
-    return (abi.encodePacked(userOp.sender, maxCost), 0);
+    return (abi.encode(userOp.sender), _packValidationData(false, validUntil, validAfter));
   }
 
-  /**
-   * @notice Post-operation hook (called after user op execution)
-   * @param mode Operation mode
-   * @param context Context from validatePaymasterUserOp
-   * @param actualGasCost Actual gas cost
-   */
-  function postOp(
-    PostOpMode mode,
-    bytes calldata context,
-    uint256 actualGasCost
-  ) external {
-    require(msg.sender == address(entryPoint), "Only entry point");
-
-    if (context.length == 0) {
-      return;
-    }
-
-    // Decode context (checks)
-    (address account, uint256 maxCost) = abi.decode(context, (address, uint256));
-
-    // Cap sponsored amount to maxCost (effects first - checks-effects-interactions pattern)
-    uint256 sponsoredAmount = actualGasCost > maxCost ? maxCost : actualGasCost;
-
-    // Update state before external calls (effects)
-    gasSponsored[account] += sponsoredAmount;
-
-    // External interactions last
-    emit GasSponsored(account, tx.origin, sponsoredAmount);
+  function _postOp(PostOpMode, bytes calldata context, uint256 actualGasCost, uint256) internal override {
+    address account = abi.decode(context, (address));
+    gasSponsored[account] += actualGasCost;
+    emit GasSponsored(account, actualGasCost);
   }
-
-  /**
-   * @notice Get total gas sponsored for account
-   */
-  function getGasSponsored(address account) external view returns (uint256) {
-    return gasSponsored[account];
-  }
-
-  /**
-   * @notice Deposit ETH to paymaster
-   */
-  function deposit() public payable {
-    entryPoint.depositTo{value: msg.value}(address(this));
-  }
-
-  /**
-   * @notice Withdraw balance
-   */
-  function withdraw(address payable to, uint256 amount) external onlyOwner {
-    entryPoint.withdrawTo(to, amount);
-  }
-
-  /**
-   * @notice Get paymaster balance
-   */
-  function getBalance() external view returns (uint256) {
-    return entryPoint.balanceOf(address(this));
-  }
-
-  /**
-   * @notice Receive ETH
-   */
-  receive() external payable {}
 }

@@ -6,10 +6,11 @@ async function main() {
   // Get deployer account
   const [deployer] = await ethers.getSigners();
   console.log('Deploying with account:', deployer.address);
-  console.log('Account balance:', (await deployer.getBalance()).toString());
+  console.log('Account balance:', (await ethers.provider.getBalance(deployer.address)).toString());
 
-  // Get or use mock EntryPoint (in production, use official EntryPoint 0x5FF137D4B0FDCD49DcA30c7B57B04B0ca3615723)
-  const ENTRY_POINT = process.env.ENTRY_POINT || '0x5FF137D4B0FDCD49DcA30c7B57B04B0ca3615723';
+  // Canonical EntryPoint v0.7 (same address on every chain where it is deployed).
+  // These contracts target v0.7 and will NOT work with the v0.6 EntryPoint.
+  const ENTRY_POINT = process.env.ENTRY_POINT || '0x0000000071727De22E5E9d8BAf0edAc6f37da032';
 
   // Deploy SimpleAccountFactory
   console.log('\n📦 Deploying SimpleAccountFactory...');
@@ -32,7 +33,7 @@ async function main() {
   console.log('\n💰 Funding paymaster...');
   const fundTx = await paymaster.deposit({ value: ethers.parseEther('10') });
   await fundTx.wait();
-  const balance = await paymaster.getBalance();
+  const balance = await paymaster.getDeposit();
   console.log('✅ Paymaster balance:', ethers.formatEther(balance), 'ETH');
 
   // Create sample account
@@ -40,7 +41,7 @@ async function main() {
   const salt = 0;
   const tx = await factory.createAccount(deployer.address, salt);
   await tx.wait();
-  const accountAddress = await factory.getAddress(deployer.address, salt);
+  const accountAddress = await factory.getAccountAddress(deployer.address, salt);
   console.log('✅ Sample account created at:', accountAddress);
 
   // Enable sponsorship for sample account

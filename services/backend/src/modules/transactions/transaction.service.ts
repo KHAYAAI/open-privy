@@ -1,10 +1,16 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ethers } from 'ethers';
 import { Transaction } from './entities/transaction.entity';
 import { EthereumService } from '../blockchain/ethereum.service';
 import { WalletService } from '../wallet/wallet.service';
+import { SanctionsService } from '../compliance/sanctions.service';
 import { logger } from '../../common/logger';
 import * as crypto from 'crypto';
 
@@ -15,6 +21,7 @@ export class TransactionService {
     private txRepository: Repository<Transaction>,
     private ethereumService: EthereumService,
     private walletService: WalletService,
+    private sanctionsService: SanctionsService,
   ) {}
 
   async createSigningRequest(
@@ -76,6 +83,20 @@ export class TransactionService {
         throw new BadRequestException('Transaction does not belong to this user');
       }
 
+      // Screen the decoded destination, not just raw calldata — a signed tx
+      // is attacker-opaque until parsed, and sanctions screening on an opaque
+      // blob is no screening at all.
+      const decoded = ethers.Transaction.from(signedTx);
+      if (decoded.to) {
+        const screening = await this.sanctionsService.screenAddress(decoded.to, tx.chain);
+        if (screening.blocked) {
+          tx.status = 'failed';
+          await this.txRepository.save(tx);
+          logger.error(`Blocked broadcast to ${decoded.to}: ${screening.reason}`);
+          throw new ForbiddenException(screening.reason || 'Destination address is blocked');
+        }
+      }
+
       // Broadcast to blockchain
       const txHash = await this.ethereumService.broadcastTransaction(signedTx);
 
@@ -96,6 +117,79 @@ export class TransactionService {
     } catch (error) {
       logger.error(`Failed to confirm transaction: ${error.message}`);
       throw error;
+    }
+  }
+
+  /**
+   * Custodial send: decrypt the user's key server-side, sign a native-value
+   * transfer, broadcast it, and record it. This is the end-to-end path that
+   * makes an embedded wallet actually able to move funds.
+   *
+   * Only EVM chains (ethereum/polygon) are handled here; Solana has its own
+   * signing path in SolanaService.
+   */
+  async sendTransaction(
+    userId: string,
+    walletId: string,
+    to: string,
+    amount: string,
+  ): Promise<{ id: string; txHash: string; status: string }> {
+    const wallet = await this.walletService.getWalletById(walletId);
+
+    if (wallet.userId !== userId) {
+      throw new ForbiddenException('Wallet does not belong to this user');
+    }
+
+    if (!ethers.isAddress(to)) {
+      throw new BadRequestException('Invalid destination address');
+    }
+
+    let value: bigint;
+    try {
+      value = ethers.parseEther(amount);
+    } catch {
+      throw new BadRequestException('Invalid amount');
+    }
+    if (value <= 0n) {
+      throw new BadRequestException('Amount must be greater than zero');
+    }
+
+    const screening = await this.sanctionsService.screenAddress(to, wallet.chain);
+    if (screening.blocked) {
+      logger.error(`Blocked custodial send to ${to}: ${screening.reason}`);
+      throw new ForbiddenException(screening.reason || 'Destination address is blocked');
+    }
+
+    const provider = this.ethereumService.getProvider();
+    const signer = await this.walletService.getEvmSigner(walletId, userId, provider);
+
+    // Persist the intent before broadcasting so we always have a record.
+    const tx = this.txRepository.create({
+      userId,
+      walletId,
+      requestId: crypto.randomUUID(),
+      chain: wallet.chain,
+      fromAddress: wallet.address,
+      toAddress: to,
+      amount: value.toString(),
+      status: 'pending',
+      metadata: { custodialSigning: true },
+    });
+    await this.txRepository.save(tx);
+
+    try {
+      const txResponse = await signer.sendTransaction({ to, value });
+      tx.txHash = txResponse.hash;
+      await this.txRepository.save(tx);
+
+      logger.info(`Custodial transaction broadcast: ${txResponse.hash}`);
+
+      return { id: tx.id, txHash: txResponse.hash, status: 'pending' };
+    } catch (error) {
+      tx.status = 'failed';
+      await this.txRepository.save(tx);
+      logger.error(`Custodial send failed: ${error.message}`);
+      throw new BadRequestException(`Failed to send transaction: ${error.message}`);
     }
   }
 
@@ -127,7 +221,7 @@ export class TransactionService {
             status: finalStatus,
             confirmedAt: new Date(),
             metadata: receipt,
-          },
+          } as any,
         );
       }
     } catch (error) {

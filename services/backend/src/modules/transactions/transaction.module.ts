@@ -5,9 +5,15 @@ import { TransactionController } from './transaction.controller';
 import { Transaction } from './entities/transaction.entity';
 import { BlockchainModule } from '../blockchain/blockchain.module';
 import { WalletModule } from '../wallet/wallet.module';
+import { ComplianceModule } from '../compliance/compliance.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Transaction]), BlockchainModule, WalletModule],
+  imports: [
+    TypeOrmModule.forFeature([Transaction]),
+    BlockchainModule,
+    WalletModule,
+    ComplianceModule,
+  ],
   providers: [TransactionService],
   controllers: [TransactionController],
   exports: [TransactionService],
