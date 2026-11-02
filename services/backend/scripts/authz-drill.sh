@@ -51,7 +51,13 @@ npm run migration:run >"$LOG_DIR/migrate.log" 2>&1 || { cat "$LOG_DIR/migrate.lo
 
 SERVER_PID=""
 start_server() { # $1 = ENABLE_SOCIAL_RECOVERY value
-  ENABLE_SOCIAL_RECOVERY="$1" node dist/main.js >"$LOG_DIR/server.log" 2>&1 &
+  # With recovery on, emails go to the test outbox, which only runs outside NODE_ENV=production.
+  if [ "$1" = "true" ]; then
+    NODE_ENV=test ENABLE_SOCIAL_RECOVERY=true NOTIFIER_PROVIDER=outbox NOTIFIER_OUTBOX_FILE="$LOG_DIR/outbox.jsonl" \
+      node dist/main.js >"$LOG_DIR/server.log" 2>&1 &
+  else
+    ENABLE_SOCIAL_RECOVERY=false node dist/main.js >"$LOG_DIR/server.log" 2>&1 &
+  fi
   SERVER_PID=$!
   for _ in $(seq 1 40); do
     [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/health" 2>/dev/null)" = "200" ] && return 0
@@ -66,7 +72,7 @@ A=$(new_user); B=$(new_user)
 
 # --- social recovery is off by default -------------------------------------
 start_server false
-[ "$(status GET /recovery/contacts "$A")" = "404" ] || fail "social recovery routes should be hidden (404) when disabled"
+[ "$(status GET /recovery/guardians "$A")" = "404" ] || fail "social recovery routes should be hidden (404) when disabled"
 pass "social recovery is off unless ENABLE_SOCIAL_RECOVERY=true"
 stop_server
 
@@ -94,25 +100,24 @@ grep -qi "does not belong" "$LOG_DIR/body" || { body; fail "send from A's wallet
 pass "B cannot send from A's wallet"
 
 # --- social recovery (enabled) ---------------------------------------------
-[ "$(status POST /recovery/contacts "$A" '{"contactName":"A Guardian","contactEmail":"guardian@example.com"}')" = "201" ] \
-  || { body; fail "A could not add a recovery contact"; }
-grep -q verificationToken "$LOG_DIR/body" && fail "add-contact response leaks the verification token to the account owner"
-CONTACT_A=$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1])).contact.id)" "$LOG_DIR/body")
-pass "add-contact response does not include the verification token"
+[ "$(status POST /recovery/guardians "$A" '{"name":"A Guardian","email":"guardian@example.com"}')" = "201" ] \
+  || { body; fail "A could not add a guardian"; }
+grep -qi token "$LOG_DIR/body" && fail "add-guardian response leaks a token to the account owner"
+GUARDIAN_A=$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1])).id)" "$LOG_DIR/body")
+pass "add-guardian response does not include the invite token"
 
-status GET /recovery/contacts "$B" >/dev/null
-grep -q "$CONTACT_A" "$LOG_DIR/body" && fail "B can list A's recovery contacts"
-[ "$(body)" = "[]" ] || { body; fail "B should see an empty contact list"; }
-pass "B cannot list A's recovery contacts"
+status GET /recovery/guardians "$B" >/dev/null
+grep -q "$GUARDIAN_A" "$LOG_DIR/body" && fail "B can list A's guardians"
+pass "B cannot list A's guardians"
 
-status GET /recovery/contacts "$A" >/dev/null
-grep -q "$CONTACT_A" "$LOG_DIR/body" || { body; fail "A cannot see own contact"; }
-grep -q verificationToken "$LOG_DIR/body" && fail "contact list leaks verification tokens"
-pass "A sees own contacts, without tokens"
+status GET /recovery/guardians "$A" >/dev/null
+grep -q "$GUARDIAN_A" "$LOG_DIR/body" || { body; fail "A cannot see own guardian"; }
+grep -qi token "$LOG_DIR/body" && fail "guardian list leaks tokens"
+pass "A sees own guardians, without tokens"
 
-status DELETE "/recovery/contacts/${CONTACT_A}" "$B" >/dev/null
-[ "$(db "SELECT count(*) FROM recovery_contacts WHERE id='${CONTACT_A}';")" = "1" ] || fail "B deleted A's recovery contact"
-pass "B cannot delete A's recovery contact"
+[ "$(status DELETE "/recovery/guardians/${GUARDIAN_A}" "$B")" = "404" ] || fail "B's delete of A's guardian was not refused"
+[ "$(db "SELECT status FROM guardians WHERE id='${GUARDIAN_A}';")" = "pending" ] || fail "B removed A's guardian"
+pass "B cannot remove A's guardian"
 
 # --- CSRF on the cookie session ----------------------------------------------
 [ "$(status POST /auth/logout - '' -H "Cookie: op_session=${A}")" = "403" ] || { body; fail "cookie POST without X-CSRF-Token was accepted"; }

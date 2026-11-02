@@ -1,102 +1,80 @@
-import { Controller, Get, Post, Delete, Body, Query, Param, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { AuthUser, CurrentUser } from '../auth/decorators/current-user.decorator';
 import { SocialRecoveryEnabledGuard } from './social-recovery.enabled.guard';
-import { RecoveryContact } from './entities/recovery-contact.entity';
-import { RecoveryGuardian } from './entities/recovery-guardian.entity';
-import { SocialRecoveryService } from './social-recovery.service';
-import { CurrentUser, AuthUser } from '../auth/decorators/current-user.decorator';
+import { RecoveryService } from './recovery.service';
+import { AddGuardianDto, DecisionDto, StartRecoveryDto, TokenDto } from './dto/recovery.dto';
 
+/**
+ * Social recovery. Signed-in routes manage your guardians or recover onto
+ * your (new) account. Guardian and cancel routes are authenticated by the
+ * one-time token from the email, sent in the body (never the URL path) and
+ * only ever acted on by POST, so link scanners opening an email do nothing.
+ */
 @Controller('recovery')
-@UseGuards(JwtAuthGuard, SocialRecoveryEnabledGuard)
+@UseGuards(SocialRecoveryEnabledGuard)
 export class SocialRecoveryController {
-  constructor(private recoveryService: SocialRecoveryService) {}
+  constructor(private readonly recovery: RecoveryService) {}
 
-  @Post('contacts')
-  async addRecoveryContact(
-    @CurrentUser() user: AuthUser,
-    @Body() body: { contactEmail: string; contactName: string },
-  ) {
-    const contact = await this.recoveryService.addRecoveryContact(
-      user.userId,
-      body.contactEmail,
-      body.contactName,
-    );
-    return { success: true, contact: toContactView(contact) };
+  @Get('guardians')
+  @UseGuards(JwtAuthGuard)
+  listGuardians(@CurrentUser() user: AuthUser) {
+    return this.recovery.listGuardians(user.userId);
   }
 
-  @Get('contacts')
-  async getRecoveryContacts(@CurrentUser() user: AuthUser) {
-    const contacts = await this.recoveryService.getRecoveryContacts(user.userId);
-    return contacts.map(toContactView);
+  @Post('guardians')
+  @UseGuards(JwtAuthGuard)
+  addGuardian(@CurrentUser() user: AuthUser, @Body() body: AddGuardianDto) {
+    return this.recovery.addGuardian(user.userId, body.name, body.email);
   }
 
-  @Post('contacts/verify')
-  async verifyRecoveryContact(
-    @CurrentUser() user: AuthUser,
-    @Query('token') token: string,
-  ) {
-    const contact = await this.recoveryService.verifyRecoveryContact(
-      user.userId,
-      token,
-    );
-    return { success: true, contact: toContactView(contact) };
+  @Delete('guardians/:id')
+  @UseGuards(JwtAuthGuard)
+  async removeGuardian(@CurrentUser() user: AuthUser, @Param('id', new ParseUUIDPipe()) id: string) {
+    await this.recovery.removeGuardian(user.userId, id);
+    return { removed: true };
   }
 
-  @Delete('contacts/:contactId')
-  async removeRecoveryContact(
-    @CurrentUser() user: AuthUser,
-    @Param('contactId') contactId: string,
-  ) {
-    await this.recoveryService.removeRecoveryContact(user.userId, contactId);
-    return { success: true };
+  @Post('guardian-invites/lookup')
+  @HttpCode(200)
+  describeInvite(@Body() body: TokenDto) {
+    return this.recovery.describeInvite(body.token);
   }
 
-  @Post('initiate')
-  async initiateRecovery(
-    @CurrentUser() user: AuthUser,
-    @Body() body: { contactIds: string[] },
-  ) {
-    await this.recoveryService.initiateRecovery(user.userId, body.contactIds);
-    return { success: true, message: 'Recovery initiated' };
+  @Post('guardian-invites/confirm')
+  @HttpCode(200)
+  confirmInvite(@Body() body: TokenDto) {
+    return this.recovery.confirmInvite(body.token);
   }
 
-  @Post('approve')
-  async approveRecovery(
-    @CurrentUser() user: AuthUser,
-    @Query('code') recoveryCode: string,
-  ) {
-    const guardian = await this.recoveryService.approveRecovery(
-      user.userId,
-      recoveryCode,
-    );
-    return { success: true, guardian: toGuardianView(guardian) };
+  @Post('requests')
+  @HttpCode(202)
+  @UseGuards(JwtAuthGuard)
+  start(@CurrentUser() user: AuthUser, @Body() body: StartRecoveryDto) {
+    return this.recovery.startRequest(user.userId, body.oldAccountEmail);
   }
 
-  @Post('complete')
-  async completeRecovery(@CurrentUser() user: AuthUser) {
-    const result = await this.recoveryService.completeRecovery(user.userId);
-    return { success: true, ...result };
+  @Get('requests/current')
+  @UseGuards(JwtAuthGuard)
+  current(@CurrentUser() user: AuthUser) {
+    return this.recovery.currentRequest(user.userId);
   }
 
-  @Get('status')
-  async getRecoveryStatus(@CurrentUser() user: AuthUser) {
-    const status = await this.recoveryService.getRecoveryStatus(user.userId);
-    return status;
+  @Post('requests/cancel')
+  @HttpCode(200)
+  cancel(@Body() body: TokenDto) {
+    return this.recovery.cancelByToken(body.token);
   }
 
-  @Get('approvals')
-  async getPendingApprovals(@CurrentUser() user: AuthUser) {
-    const approvals = await this.recoveryService.getPendingApprovals(user.userId);
-    return approvals.map(toGuardianView);
+  @Post('approvals/lookup')
+  @HttpCode(200)
+  describeApproval(@Body() body: TokenDto) {
+    return this.recovery.describeApproval(body.token);
   }
-}
 
-/** Public shape of a contact: never includes the email verification token. */
-export function toContactView(c: RecoveryContact) {
-  return { id: c.id, contactEmail: c.contactEmail, contactName: c.contactName, isVerified: c.isVerified, createdAt: c.createdAt };
-}
-
-/** Public shape of a guardian request: never includes the guardian's recovery code. */
-export function toGuardianView(g: RecoveryGuardian) {
-  return { id: g.id, contactId: g.contactId, hasApproved: g.hasApproved, approvalTimestamp: g.approvalTimestamp ?? null };
+  @Post('approvals/decide')
+  @HttpCode(200)
+  decide(@Body() body: DecisionDto) {
+    return this.recovery.decide(body.token, body.decision);
+  }
 }

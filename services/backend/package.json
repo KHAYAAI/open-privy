@@ -24,7 +24,8 @@
     "clean": "rm -rf dist",
     "drill:rotation": "bash scripts/key-rotation-drill.sh",
     "rotate:master-key": "node dist/scripts/rotate-master-key.js",
-    "drill:authz": "bash scripts/authz-drill.sh"
+    "drill:authz": "bash scripts/authz-drill.sh",
+    "drill:social-recovery": "bash scripts/social-recovery-drill.sh"
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.556.0",
@@ -59,7 +60,8 @@
     "reflect-metadata": "^0.2.1",
     "rxjs": "^7.8.1",
     "typeorm": "^0.3.17",
-    "winston": "^3.11.0"
+    "winston": "^3.11.0",
+    "@aws-sdk/client-sesv2": "^3.556.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.24",

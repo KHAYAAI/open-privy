@@ -5,8 +5,9 @@ import { User } from './modules/auth/entities/user.entity';
 import { Wallet } from './modules/wallet/entities/wallet.entity';
 import { Transaction } from './modules/transactions/entities/transaction.entity';
 import { AuditLog } from './common/entities/audit-log.entity';
-import { RecoveryContact } from './modules/social-recovery/entities/recovery-contact.entity';
-import { RecoveryGuardian } from './modules/social-recovery/entities/recovery-guardian.entity';
+import { Guardian } from './modules/social-recovery/entities/guardian.entity';
+import { RecoveryRequest } from './modules/social-recovery/entities/recovery-request.entity';
+import { RecoveryApproval } from './modules/social-recovery/entities/recovery-approval.entity';
 import { SanctionedAddress } from './modules/compliance/entities/sanctioned-address.entity';
 import { ComplianceSyncState } from './modules/compliance/entities/compliance-sync-state.entity';
 
@@ -25,8 +26,9 @@ export default new DataSource({
     Wallet,
     Transaction,
     AuditLog,
-    RecoveryContact,
-    RecoveryGuardian,
+    Guardian,
+    RecoveryRequest,
+    RecoveryApproval,
     SanctionedAddress,
     ComplianceSyncState,
   ],

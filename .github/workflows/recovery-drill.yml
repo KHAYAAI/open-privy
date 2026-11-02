@@ -68,3 +68,12 @@ jobs:
           DRILL_DB_PASSWORD: dev
         run: npm run drill:authz
         working-directory: services/backend
+
+      # Guardians, approvals, 48h time lock (shortened), wallet hand-over to a
+      # new account, plus cancel/decline/cooldown negatives.
+      - name: Run the social recovery drill
+        env:
+          DRILL_DB_USER: app
+          DRILL_DB_PASSWORD: dev
+        run: npm run drill:social-recovery
+        working-directory: services/backend

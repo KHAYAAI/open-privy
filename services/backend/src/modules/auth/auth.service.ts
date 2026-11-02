@@ -1,4 +1,5 @@
 import {
+  Optional,
   Injectable,
   BadRequestException,
   UnauthorizedException,
@@ -7,6 +8,8 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+
+import { RecoveryService } from '../social-recovery/recovery.service';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { User } from './entities/user.entity';
 import { SignupDto } from './dto/signup.dto';
@@ -21,7 +24,17 @@ export class AuthService {
     @InjectRepository(User)
     private usersRepository: Repository<User>,
     private jwtService: JwtService,
+    @Optional() private recoveryService?: RecoveryService,
   ) {}
+
+  /** A recovered account's wallets now belong to another account; it can't sign in again. */
+  private assertNotLocked(user: User) {
+    if (user.lockedAt) {
+      throw new UnauthorizedException(
+        'This account was recovered to a new account and can no longer sign in. Sign in with the new account.',
+      );
+    }
+  }
 
   /**
    * Lazily construct the Supabase client so the app (and the WorkOS auth path)
@@ -95,6 +108,8 @@ export class AuthService {
       if (!user) {
         throw new UnauthorizedException('User not found');
       }
+      this.assertNotLocked(user);
+      await this.recoveryService?.cancelForSignIn(user.id);
 
       const payload = { sub: user.id, email: user.email };
       const token = this.jwtService.sign(payload);
@@ -160,6 +175,8 @@ export class AuthService {
       }
     }
 
+    if (user) this.assertNotLocked(user);
+
     if (!user) {
       user = this.usersRepository.create({
         email: profile.email,
@@ -173,6 +190,8 @@ export class AuthService {
     }
 
     await this.usersRepository.save(user);
+    // Someone who can sign in is not locked out: open recovery requests against them end now.
+    await this.recoveryService?.cancelForSignIn(user.id);
 
     const token = this.jwtService.sign({ sub: user.id, email: user.email });
     logger.info(`WorkOS login for ${user.email} (${user.id})`);

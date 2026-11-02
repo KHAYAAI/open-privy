@@ -30,6 +30,14 @@ export class User {
   @Column({ type: 'boolean', default: false })
   mfaEnabled: boolean;
 
+  /** Set when the account's wallets were recovered to another account; it can no longer sign in. */
+  @Column({ type: 'timestamptz', nullable: true })
+  lockedAt: Date | null;
+
+  /** Tokens issued before this instant are rejected (session revocation). */
+  @Column({ type: 'timestamptz', nullable: true })
+  sessionsValidAfter: Date | null;
+
   @CreateDateColumn()
   createdAt: Date;
 
